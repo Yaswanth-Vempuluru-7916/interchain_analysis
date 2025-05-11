@@ -27,10 +27,10 @@ const analysisPool = new Pool({
   port: Number(process.env.ANALYSIS_DB_PORT),
 });
 
-// Initialize final_orders_dup table
+// Initialize orders_final table
 const initTable = async () => {
   const createTableQuery = `
-      CREATE TABLE IF NOT EXISTS final_orders_dup (
+      CREATE TABLE IF NOT EXISTS orders_final (
         id SERIAL PRIMARY KEY,
         create_order_id TEXT NOT NULL UNIQUE,
         source_swap_id TEXT NOT NULL,
@@ -62,14 +62,14 @@ const initTable = async () => {
   try {
     await analysisPool.query(createTableQuery);
     console.log(
-      "final_orders_dup table ensured with TIMESTAMPTZ columns, secret_hash, block numbers, and chain columns"
+      "orders_final table ensured with TIMESTAMPTZ columns, secret_hash, block numbers, and chain columns"
     );
   } catch (err) {
-    console.error("Failed to ensure final_orders_dup table:", err);
+    console.error("Failed to ensure orders_final table:", err);
   }
 };
 
-// Populate final_orders_dup with new completed orders from stage_db
+// Populate orders_final with new completed orders from stage_db
 const populateOrderAnalysis = async () => {
   try {
     const query = `
@@ -115,7 +115,7 @@ const populateOrderAnalysis = async () => {
     for (const row of result.rows) {
       await analysisPool.query(
         `
-          INSERT INTO final_orders_dup (
+          INSERT INTO orders_final (
             create_order_id, source_swap_id, destination_swap_id, created_at,
             source_chain, destination_chain,
             user_init, cobi_init, user_redeem, cobi_redeem, user_refund, cobi_refund,
@@ -160,10 +160,10 @@ const populateOrderAnalysis = async () => {
     }
 
     await analysisPool.query("COMMIT");
-    console.log(`Inserted ${result.rowCount} new orders into final_orders_dup`);
+    console.log(`Inserted ${result.rowCount} new orders into orders_final`);
   } catch (err) {
     await analysisPool.query("ROLLBACK");
-    console.error("Error populating final_orders_dup:", err);
+    console.error("Error populating orders_final:", err);
   }
 };
 
@@ -223,7 +223,7 @@ const getChainCombinationAverages = async (req: Request<{}, {}, TimeframeRequest
       AVG(CASE WHEN user_refund IS NOT NULL AND user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (user_refund - user_init)), 0) END) AS avg_user_refund_duration,
       AVG(CASE WHEN cobi_redeem IS NOT NULL AND cobi_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_redeem - cobi_init)), 0) END) AS avg_cobi_redeem_duration,
       AVG(CASE WHEN cobi_refund IS NOT NULL AND cobi_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_refund - cobi_init)), 0) END) AS avg_cobi_refund_duration
-    FROM final_orders_dup
+    FROM orders_final
     WHERE created_at BETWEEN $1 AND $2
       AND (
         user_init IS NOT NULL OR
@@ -248,7 +248,7 @@ const getChainCombinationAverages = async (req: Request<{}, {}, TimeframeRequest
       COALESCE(cobi_redeem, '1970-01-01'::timestamp with time zone),
       COALESCE(cobi_refund, '1970-01-01'::timestamp with time zone)
     )) AS last_updated
-    FROM final_orders_dup
+    FROM orders_final
     WHERE (
       (user_init_block_number IS NOT NULL AND user_init IS NOT NULL) OR
       (user_redeem_block_number IS NOT NULL AND user_redeem IS NOT NULL) OR
@@ -346,7 +346,7 @@ const getAllIndividualOrders = async (req: Request<{}, {}, TimeframeRequestBody>
         COALESCE(CASE WHEN cobi_redeem IS NOT NULL AND cobi_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_redeem - cobi_init)), 0) END, 0) +
         COALESCE(CASE WHEN cobi_refund IS NOT NULL AND cobi_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_refund - cobi_init)), 0) END, 0)
       ) AS overall_duration
-    FROM final_orders_dup
+    FROM orders_final
     WHERE created_at BETWEEN $1 AND $2
       AND (
         user_init IS NOT NULL OR
