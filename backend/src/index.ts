@@ -208,14 +208,17 @@ const getChainCombinationAverages = async (req: Request<{}, {}, TimeframeRequest
       destination_chain,
       COUNT(*) AS total_orders,
       AVG(CASE WHEN user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (user_init - created_at)), 0) END) AS avg_user_init_duration,
-      AVG(CASE 
-        WHEN cobi_init IS NOT NULL 
-        AND user_init IS NOT NULL 
-        AND (user_redeem IS NOT NULL OR cobi_redeem IS NOT NULL) 
-        AND user_refund IS NULL 
-        AND cobi_refund IS NULL 
-        THEN GREATEST(EXTRACT(EPOCH FROM (cobi_init - user_init)), 0) 
-      END) AS avg_cobi_init_duration,
+      COALESCE(
+        AVG(CASE 
+          WHEN cobi_init IS NOT NULL 
+          AND user_init IS NOT NULL 
+          AND (user_redeem IS NOT NULL OR cobi_redeem IS NOT NULL) 
+          AND user_refund IS NULL 
+          AND cobi_refund IS NULL 
+          THEN GREATEST(EXTRACT(EPOCH FROM (cobi_init - user_init)), 0) 
+        END),
+        0
+      ) AS avg_cobi_init_duration,
       AVG(CASE WHEN user_redeem IS NOT NULL AND user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (user_redeem - cobi_init)), 0) END) AS avg_user_redeem_duration,
       AVG(CASE WHEN user_refund IS NOT NULL AND user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (user_refund - user_init)), 0) END) AS avg_user_refund_duration,
       AVG(CASE WHEN cobi_redeem IS NOT NULL AND cobi_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_redeem - cobi_init)), 0) END) AS avg_cobi_redeem_duration,
@@ -272,7 +275,7 @@ const getChainCombinationAverages = async (req: Request<{}, {}, TimeframeRequest
       acc[key] = {
         total_orders: parseInt(row.total_orders, 10),
         avg_user_init_duration: row.avg_user_init_duration ? parseFloat(row.avg_user_init_duration) : null,
-        avg_cobi_init_duration: row.avg_cobi_init_duration ? parseFloat(row.avg_cobi_init_duration) : null,
+        avg_cobi_init_duration: parseFloat(row.avg_cobi_init_duration),
         avg_user_redeem_duration: row.avg_user_redeem_duration ? parseFloat(row.avg_user_redeem_duration) : null,
         avg_user_refund_duration: row.avg_user_refund_duration ? parseFloat(row.avg_user_refund_duration) : null,
         avg_cobi_redeem_duration: row.avg_cobi_redeem_duration ? parseFloat(row.avg_cobi_redeem_duration) : null,
