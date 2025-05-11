@@ -40,22 +40,26 @@ interface OrdersResponse {
 }
 
 const App = () => {
-  // State for date inputs and API data
   const [startTime, setStartTime] = useState<Date | null>(null);
   const [endTime, setEndTime] = useState<Date | null>(null);
   const [averagesData, setAveragesData] = useState<AveragesResponse['averages'] | null>(null);
   const [ordersData, setOrdersData] = useState<OrdersResponse['orders'] | null>(null);
   const [lastUpdated, setLastUpdated] = useState('');
   const [error, setError] = useState('');
+  const [isFetching, setIsFetching] = useState(false);
+  const [copiedOrderId, setCopiedOrderId] = useState<string | null>(null);
 
-  // Fetch data from backend
   const fetchData = async () => {
-    // Validate dates
     const isValidDate = (date: Date | null) => date === null || !isNaN(date.getTime());
     if ((startTime && !isValidDate(startTime)) || (endTime && !isValidDate(endTime))) {
       setError('Invalid date format');
       return;
     }
+
+    setIsFetching(true);
+    setAveragesData(null);
+    setOrdersData(null);
+    setError('');
 
     try {
       const averagesResponse = await axios.post<AveragesResponse>('http://localhost:3000/averages', {
@@ -74,21 +78,20 @@ const App = () => {
     } catch (err) {
       setError('Failed to fetch data from backend');
       console.error(err);
+    } finally {
+      setIsFetching(false);
     }
   };
 
-  // Fetch data on mount (default 30 days)
   useEffect(() => {
     fetchData();
   }, []);
 
-  // Handle form submission
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     fetchData();
   };
 
-  // Format duration to hours, minutes, or seconds
   const formatDecimal = (value: number | null): string => {
     if (value === null) return 'N/A';
     if (value > 3600) {
@@ -101,14 +104,45 @@ const App = () => {
     return `${value.toFixed(2)}s`;
   };
 
+  const copyToClipboard = (text: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedOrderId(text);
+    setTimeout(() => setCopiedOrderId(null), 2000);
+  };
+
   return (
-    <div className="min-h-screen bg-gray-100 p-4">
-      {/* Header with Date Inputs and Last Updated */}
-      <div className="max-w-7xl mx-auto mb-6">
-        <h1 className="text-2xl font-bold text-gray-800 mb-4">Swap Order Durations</h1>
-        <form onSubmit={handleSubmit} className="flex flex-col sm:flex-row gap-4 items-center mb-4">
-          <div className="flex flex-col">
-            <label className="text-sm font-medium text-gray-600">Start Date</label>
+    <div className="min-h-screen bg-gradient-to-br from-[#E0F5F5] to-[#A7E4E0] p-8 text-gray-800 font-sans">
+      <style>
+        {`
+          .react-datepicker-popper {
+            z-index: 9999 !important;
+          }
+          .react-datepicker {
+            font-family: sans-serif !important;
+          }
+          .react-datepicker__input-container input {
+            width: 100%;
+            background-color: white;
+            border: 1px solid #d1d5db;
+            border-radius: 0.5rem;
+            padding: 0.75rem;
+            color: #1f2937;
+            transition: all 0.3s;
+          }
+          .react-datepicker__input-container input:focus {
+            border-color: #F06292;
+            outline: none;
+            box-shadow: 0 0 0 2px rgba(240, 98, 146, 0.3);
+          }
+        `}
+      </style>
+      <div id="portal" />
+      <div className="max-w-7xl mx-auto mb-10 bg-white/90 backdrop-blur-md p-8 rounded-2xl shadow-lg border border-gray-200/50">
+        <h1 className="text-4xl font-bold mb-6 text-gray-800 drop-shadow-lg">Garden Interchain Analysis</h1>
+        
+        <form onSubmit={handleSubmit} className="flex flex-col sm:flex-row gap-6 items-end mb-6">
+          <div className="flex flex-col flex-1">
+            <label className="text-sm font-medium text-gray-600 mb-2">Start Date</label>
             <DatePicker
               selected={startTime}
               onChange={(date: Date | null) => setStartTime(date || new Date())}
@@ -116,12 +150,13 @@ const App = () => {
               dateFormat="yyyy-MM-dd HH:mm"
               timeFormat="HH:mm"
               timeIntervals={15}
-              className="border rounded p-2 text-sm w-full"
+              maxDate={new Date()}
+              portalId="portal"
               placeholderText="Select start date and time"
             />
           </div>
-          <div className="flex flex-col">
-            <label className="text-sm font-medium text-gray-600">End Date</label>
+          <div className="flex flex-col flex-1">
+            <label className="text-sm font-medium text-gray-600 mb-2">End Date</label>
             <DatePicker
               selected={endTime}
               onChange={(date: Date | null) => setEndTime(date || new Date())}
@@ -129,121 +164,151 @@ const App = () => {
               dateFormat="yyyy-MM-dd HH:mm"
               timeFormat="HH:mm"
               timeIntervals={15}
-              className="border rounded p-2 text-sm w-full"
+              maxDate={new Date()}
+              portalId="portal"
               placeholderText="Select end date and time"
             />
           </div>
-          <div className="flex flex-col">
-            <label className="text-sm font-medium text-gray-600">Last Updated</label>
-            <span className="border rounded p-2 text-sm bg-gray-200">
+          <div className="flex flex-col flex-1">
+            <label className="text-sm font-medium text-gray-600 mb-2">Last Updated</label>
+            <span className="w-full bg-white/70 border border-gray-300 rounded-lg p-3 text-gray-600">
               {lastUpdated ? new Date(lastUpdated).toLocaleString() : 'N/A'}
             </span>
           </div>
           <div className="flex flex-col">
-            <label className="text-sm font-medium text-gray-600 invisible">Submit</label>
             <button
               type="submit"
-              className="bg-blue-500 text-white rounded p-2 text-sm hover:bg-blue-600"
+              className="bg-[#F06292] hover:bg-[#F06292]/80 text-white font-bold py-3 px-8 rounded-lg transform hover:scale-105 transition-all duration-300 shadow-lg cursor-pointer"
             >
               Fetch Data
             </button>
           </div>
         </form>
+        
         {error && (
-          <div className="text-red-600 text-sm mb-4">{error}</div>
+          <div className="text-red-600 bg-red-100/50 border border-red-300 p-4 rounded-lg animate-pulse">{error}</div>
         )}
       </div>
 
-      {/* Average Durations Table */}
-      <div className="max-w-7xl mx-auto mb-8">
-        <h2 className="text-xl font-semibold text-gray-800 mb-4">Average Durations</h2>
-        <div className="overflow-x-auto">
-          <table className="min-w-full bg-white border border-gray-300">
-            <thead>
-              <tr className="bg-gray-200">
-                <th className="py-2 px-4 border-b text-left text-sm font-medium text-gray-700">Chain Pair</th>
-                <th className="py-2 px-4 border-b text-left text-sm font-medium text-gray-700">Total Orders</th>
-                <th className="py-2 px-4 border-b text-left text-sm font-medium text-gray-700">User Init</th>
-                <th className="py-2 px-4 border-b text-left text-sm font-medium text-gray-700">Cobi Init</th>
-                <th className="py-2 px-4 border-b text-left text-sm font-medium text-gray-700">User Redeem</th>
-                <th className="py-2 px-4 border-b text-left text-sm font-medium text-gray-700">Cobi Redeem</th>
-                <th className="py-2 px-4 border-b text-left text-sm font-medium text-gray-700">User Refund</th>
-                <th className="py-2 px-4 border-b text-left text-sm font-medium text-gray-700">Cobi Refund</th>
-              </tr>
-            </thead>
-            <tbody>
-              {averagesData && Object.keys(averagesData).map((chainPair) => (
-                <tr key={chainPair} className="hover:bg-gray-50">
-                  <td className="py-2 px-4 border-b text-sm text-gray-800">{chainPair}</td>
-                  <td className="py-2 px-4 border-b text-sm text-gray-800">{averagesData[chainPair].total_orders}</td>
-                  <td className="py-2 px-4 border-b text-sm text-gray-800">{formatDecimal(averagesData[chainPair].avg_user_init_duration)}</td>
-                  <td className="py-2 px-4 border-b text-sm text-gray-800">{formatDecimal(averagesData[chainPair].avg_cobi_init_duration)}</td>
-                  <td className="py-2 px-4 border-b text-sm text-gray-800">{formatDecimal(averagesData[chainPair].avg_user_redeem_duration)}</td>
-                  <td className="py-2 px-4 border-b text-sm text-gray-800">{formatDecimal(averagesData[chainPair].avg_cobi_redeem_duration)}</td>
-                  <td className="py-2 px-4 border-b text-sm text-gray-800">{formatDecimal(averagesData[chainPair].avg_user_refund_duration)}</td>
-                  <td className="py-2 px-4 border-b text-sm text-gray-800">{formatDecimal(averagesData[chainPair].avg_cobi_refund_duration)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {!averagesData && !error && (
-          <div className="text-gray-600 text-sm mt-4">Loading average durations...</div>
+      <div className="max-w-7xl mx-auto mb-12">
+        <h2 className="text-2xl font-bold mb-6 inline-block border-b-2 border-[#F06292] pb-2 text-gray-800">Average Durations</h2>
+        {isFetching ? (
+          <div className="text-gray-600 text-center mt-8 animate-pulse">Fetching chains...</div>
+        ) : (
+          averagesData ? (
+            <div className="overflow-x-auto rounded-xl backdrop-blur bg-white/90 border border-gray-200/50 shadow-lg">
+              <table className="w-full border-collapse">
+                <thead>
+                  <tr className="bg-gray-100 text-gray-800 shadow-md">
+                    <th className="py-4 px-6 text-left text-sm font-semibold uppercase tracking-wider border-b border-gray-200 sticky top-0 bg-gray-100">Chain Pair</th>
+                    <th className="py-4 px-6 text-left text-sm font-semibold uppercase tracking-wider border-b border-gray-200 sticky top-0 bg-gray-100">Total Orders</th>
+                    <th className="py-4 px-6 text-left text-sm font-semibold uppercase tracking-wider border-b border-gray-200 sticky top-0 bg-gray-100">User Init</th>
+                    <th className="py-4 px-6 text-left text-sm font-semibold uppercase tracking-wider border-b border-gray-200 sticky top-0 bg-gray-100">Cobi Init</th>
+                    <th className="py-4 px-6 text-left text-sm font-semibold uppercase tracking-wider border-b border-gray-200 sticky top-0 bg-gray-100">User Redeem</th>
+                    <th className="py-4 px-6 text-left text-sm font-semibold uppercase tracking-wider border-b border-gray-200 sticky top-0 bg-gray-100">Cobi Redeem</th>
+                    <th className="py-4 px-6 text-left text-sm font-semibold uppercase tracking-wider border-b border-gray-200 sticky top-0 bg-gray-100">User Refund</th>
+                    <th className="py-4 px-6 text-left text-sm font-semibold uppercase tracking-wider border-b border-gray-200 sticky top-0 bg-gray-100">Cobi Refund</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.keys(averagesData).map((chainPair, idx) => (
+                    <tr key={chainPair} className={`${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'} hover:bg-gray-100 transition-all duration-300 shadow-sm`}>
+                      <td className="py-4 px-6 border-b border-gray-200 font-medium text-gray-800">{chainPair}</td>
+                      <td className="py-4 px-6 border-b border-gray-200 text-[#F06292] font-semibold">{averagesData[chainPair].total_orders}</td>
+                      <td className="py-4 px-6 border-b border-gray-200 text-gray-700">{formatDecimal(averagesData[chainPair].avg_user_init_duration)}</td>
+                      <td className="py-4 px-6 border-b border-gray-200 text-gray-700">{formatDecimal(averagesData[chainPair].avg_cobi_init_duration)}</td>
+                      <td className="py-4 px-6 border-b border-gray-200 text-gray-700">{formatDecimal(averagesData[chainPair].avg_user_redeem_duration)}</td>
+                      <td className="py-4 px-6 border-b border-gray-200 text-gray-700">{formatDecimal(averagesData[chainPair].avg_cobi_redeem_duration)}</td>
+                      <td className="py-4 px-6 border-b border-gray-200 text-gray-700">{formatDecimal(averagesData[chainPair].avg_user_refund_duration)}</td>
+                      <td className="py-4 px-6 border-b border-gray-200 text-gray-700">{formatDecimal(averagesData[chainPair].avg_cobi_refund_duration)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            !error && <div className="text-gray-600 text-center mt-8 animate-pulse">Loading average durations...</div>
+          )
         )}
       </div>
 
-      {/* Individual Orders Section */}
       <div className="max-w-7xl mx-auto">
-        <h2 className="text-xl font-semibold text-gray-800 mb-4">Individual Orders</h2>
-        {ordersData && Object.keys(ordersData).map((chainPair) => (
-          <div key={chainPair} className="mb-6">
-            <details className="border rounded bg-white">
-              <summary className="py-2 px-4 bg-gray-200 cursor-pointer font-medium text-gray-800">
-                {chainPair} ({ordersData[chainPair].length} orders)
-              </summary>
-              <div className="p-4">
-                {ordersData[chainPair].length === 0 ? (
-                  <p className="text-gray-600 text-sm">No orders found for this chain pair.</p>
-                ) : (
-                  <table className="min-w-full bg-white border border-gray-300">
-                    <thead>
-                      <tr className="bg-gray-100">
-                        <th className="py-2 px-4 border-b text-left text-sm font-medium text-gray-700">Order ID</th>
-                        <th className="py-2 px-4 border-b text-left text-sm font-medium text-gray-700">Created At</th>
-                        <th className="py-2 px-4 border-b text-left text-sm font-medium text-gray-700">User Init</th>
-                        <th className="py-2 px-4 border-b text-left text-sm font-medium text-gray-700">Cobi Init</th>
-                        <th className="py-2 px-4 border-b text-left text-sm font-medium text-gray-700">User Redeem</th>
-                        <th className="py-2 px-4 border-b text-left text-sm font-medium text-gray-700">Cobi Redeem</th>
-                        <th className="py-2 px-4 border-b text-left text-sm font-medium text-gray-700">User Refund</th>
-                        <th className="py-2 px-4 border-b text-left text-sm font-medium text-gray-700">Cobi Refund</th>
-                        <th className="py-2 px-4 border-b text-left text-sm font-medium text-gray-700">Overall</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {ordersData[chainPair].map((order: Order) => (
-                        <tr key={order.create_order_id} className="hover:bg-gray-50">
-                          <td className="py-2 px-4 border-b text-sm text-gray-800">{order.create_order_id}</td>
-                          <td className="py-2 px-4 border-b text-sm text-gray-800">
-                            {new Date(order.created_at).toLocaleString()}
-                          </td>
-                          <td className="py-2 px-4 border-b text-sm text-gray-800">{formatDecimal(order.durations.user_init_duration)}</td>
-                          <td className="py-2 px-4 border-b text-sm text-gray-800">{formatDecimal(order.durations.cobi_init_duration)}</td>
-                          <td className="py-2 px-4 border-b text-sm text-gray-800">{formatDecimal(order.durations.user_redeem_duration)}</td>
-                          <td className="py-2 px-4 border-b text-sm text-gray-800">{formatDecimal(order.durations.cobi_redeem_duration)}</td>
-                          <td className="py-2 px-4 border-b text-sm text-gray-800">{formatDecimal(order.durations.user_refund_duration)}</td>
-                          <td className="py-2 px-4 border-b text-sm text-gray-800">{formatDecimal(order.durations.cobi_refund_duration)}</td>
-                          <td className="py-2 px-4 border-b text-sm text-gray-800">{formatDecimal(order.durations.overall_duration)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-            </details>
-          </div>
-        ))}
-        {!ordersData && !error && (
-          <div className="text-gray-600 text-sm mt-4">Loading individual orders...</div>
+        <h2 className="text-2xl font-bold mb-6 inline-block border-b-2 border-[#F06292] pb-2 text-gray-800">Individual Orders</h2>
+        {isFetching ? (
+          <div className="text-gray-600 text-center mt-8 animate-pulse">Fetching chains...</div>
+        ) : (
+          ordersData && Object.keys(ordersData).map((chainPair) => (
+            <div key={chainPair} className="mb-8">
+              <details className="bg-white/90 backdrop-blur rounded-xl border border-gray-200/50 overflow-hidden shadow-lg">
+                <summary className="py-4 px-6 bg-gray-100 cursor-pointer font-medium text-gray-800 flex items-center justify-between">
+                  <span className="text-lg">{chainPair}</span>
+                  <span className="bg-gray-200 text-gray-600 py-1 px-3 rounded-full text-sm">
+                    {ordersData[chainPair].length} orders
+                  </span>
+                </summary>
+                <div className="p-6">
+                  {ordersData[chainPair].length === 0 ? (
+                    <p className="text-gray-500 text-sm">No orders found for this chain pair.</p>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full border-collapse">
+                        <thead>
+                          <tr className="bg-gray-50 text-gray-800 shadow-md">
+                            <th className="py-3 px-4 text-left text-xs font-semibold uppercase tracking-wider border-b border-gray-200 sticky top-0 bg-gray-50">Order ID</th>
+                            <th className="py-3 px-4 text-left text-xs font-semibold uppercase tracking-wider border-b border-gray-200 sticky top-0 bg-gray-50">Created At</th>
+                            <th className="py-3 px-4 text-left text-xs font-semibold uppercase tracking-wider border-b border-gray-200 sticky top-0 bg-gray-50">User Init</th>
+                            <th className="py-3 px-4 text-left text-xs font-semibold uppercase tracking-wider border-b border-gray-200 sticky top-0 bg-gray-50">Cobi Init</th>
+                            <th className="py-3 px-4 text-left text-xs font-semibold uppercase tracking-wider border-b border-gray-200 sticky top-0 bg-gray-50">User Redeem</th>
+                            <th className="py-3 px-4 text-left text-xs font-semibold uppercase tracking-wider border-b border-gray-200 sticky top-0 bg-gray-50">Cobi Redeem</th>
+                            <th className="py-3 px-4 text-left text-xs font-semibold uppercase tracking-wider border-b border-gray-200 sticky top-0 bg-gray-50">User Refund</th>
+                            <th className="py-3 px-4 text-left text-xs font-semibold uppercase tracking-wider border-b border-gray-200 sticky top-0 bg-gray-50">Cobi Refund</th>
+                            <th className="py-3 px-4 text-left text-xs font-semibold uppercase tracking-wider border-b border-gray-200 sticky top-0 bg-gray-50">Overall</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {ordersData[chainPair].map((order: Order, idx) => (
+                            <tr key={order.create_order_id} className={`${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'} hover:bg-gray-100 transition-colors duration-300 shadow-sm`}>
+                              <td className="py-3 px-4 border-b border-gray-200 font-mono text-xs text-gray-800 flex items-center gap-2">
+                                {order.create_order_id}
+                                <button
+                                  onClick={() => copyToClipboard(order.create_order_id)}
+                                  className="text-gray-500 hover:text-[#F06292] transition-colors duration-200"
+                                  title={copiedOrderId === order.create_order_id ? "Copied!" : "Copy Order ID"}
+                                >
+                                  {copiedOrderId === order.create_order_id ? (
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                                    </svg>
+                                  ) : (
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                    </svg>
+                                  )}
+                                </button>
+                              </td>
+                              <td className="py-3 px-4 border-b border-gray-200 text-xs text-gray-700">
+                                {new Date(order.created_at).toLocaleString()}
+                              </td>
+                              <td className="py-3 px-4 border-b border-gray-200 text-xs text-gray-700">{formatDecimal(order.durations.user_init_duration)}</td>
+                              <td className="py-3 px-4 border-b border-gray-200 text-xs text-gray-700">{formatDecimal(order.durations.cobi_init_duration)}</td>
+                              <td className="py-3 px-4 border-b border-gray-200 text-xs text-gray-700">{formatDecimal(order.durations.user_redeem_duration)}</td>
+                              <td className="py-3 px-4 border-b border-gray-200 text-xs text-gray-700">{formatDecimal(order.durations.cobi_redeem_duration)}</td>
+                              <td className="py-3 px-4 border-b border-gray-200 text-xs text-gray-700">{formatDecimal(order.durations.user_refund_duration)}</td>
+                              <td className="py-3 px-4 border-b border-gray-200 text-xs text-gray-700">{formatDecimal(order.durations.cobi_refund_duration)}</td>
+                              <td className="py-3 px-4 border-b border-gray-200 text-xs font-medium text-[#F06292]">{formatDecimal(order.durations.overall_duration)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              </details>
+            </div>
+          ))
+        )}
+        {!ordersData && !isFetching && !error && (
+          <div className="text-gray-600 text-center mt-8 animate-pulse">Loading individual orders...</div>
         )}
       </div>
     </div>
