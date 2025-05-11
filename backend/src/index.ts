@@ -27,7 +27,7 @@ const analysisPool = new Pool({
   port: Number(process.env.ANALYSIS_DB_PORT),
 });
 
-// Initialize small_test_table
+// Initialize final_orders_dup table
 const initTable = async () => {
   const createTableQuery = `
       CREATE TABLE IF NOT EXISTS final_orders_dup (
@@ -72,14 +72,6 @@ const initTable = async () => {
 // Populate final_orders_dup with new completed orders from stage_db
 const populateOrderAnalysis = async () => {
   try {
-    // Get the last synced timestamp from final_orders_dup
-    //   const lastSyncResult = await analysisPool.query(
-    //     "SELECT MAX(created_at) as last_synced FROM final_orders_dup"
-    //   );
-    //   const lastSynced = lastSyncResult.rows[0].last_synced || "1970-01-01";
-
-    // CHANGE 1: Added s1.initiate_tx_hash and s2.initiate_tx_hash to the SELECT query
-    // Reason: These fields are needed for user_init_tx_hash and cobi_init_tx_hash in final_orders_dup
     const query = `
           SELECT DISTINCT
             mo.create_order_id,
@@ -113,20 +105,14 @@ const populateOrderAnalysis = async () => {
             OR s2.refund_tx_hash IS NOT NULL AND s2.refund_tx_hash != '')
         `;
 
-    // Set UTC time zone for stage_db query
     await stagePool.query("SET TIME ZONE 'UTC'");
-
-    // Query stage_db for new completed orders
     const result = await stagePool.query(query);
    
     if (result.rowCount === 0) return;
 
-
     await analysisPool.query("BEGIN");
 
-
     for (const row of result.rows) {
-      
       await analysisPool.query(
         `
           INSERT INTO final_orders_dup (
@@ -150,57 +136,296 @@ const populateOrderAnalysis = async () => {
           row.created_at,
           row.source_chain,
           row.destination_chain,
-          null, // user_init (to be updated by script)
-          null, // cobi_init (to be updated by script)
-          null, // user_redeem (to be updated by script)
-          null, // cobi_redeem (to be updated by script)
-          null, // user_refund (to be updated by script)
-          null, // cobi_refund (to be updated by script)
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
           row.secret_hash,
           row.source_init_block_number,
           row.source_redeem_tx_hash ? row.source_redeem_block_number : null,
           row.source_refund_tx_hash ? row.source_refund_block_number : null,
           row.destination_init_block_number,
           row.destination_redeem_tx_hash ? row.destination_redeem_block_number : null,
-          row.destination_refund_tx_hash? row.destination_refund_block_number: null,
-          row.source_init_tx_hash ? row.source_init_tx_hash : null, // user_init_tx_hash
-          row.source_redeem_tx_hash ? row.source_redeem_tx_hash : null, // user_redeem_tx_hash
-          row.source_refund_tx_hash ? row.source_refund_tx_hash : null, // user_refund_tx_hash
-          row.destination_init_tx_hash ? row.destination_init_tx_hash : null, // cobi_init_tx_hash
-          row.destination_redeem_tx_hash ? row.destination_redeem_tx_hash : null, // cobi_redeem_tx_hash
-          row.destination_refund_tx_hash ? row.destination_refund_tx_hash : null, // cobi_refund_tx_hash
+          row.destination_refund_tx_hash ? row.destination_refund_block_number : null,
+          row.source_init_tx_hash ? row.source_init_tx_hash : null,
+          row.source_redeem_tx_hash ? row.source_redeem_tx_hash : null,
+          row.source_refund_tx_hash ? row.source_refund_tx_hash : null,
+          row.destination_init_tx_hash ? row.destination_init_tx_hash : null,
+          row.destination_redeem_tx_hash ? row.destination_redeem_tx_hash : null,
+          row.destination_refund_tx_hash ? row.destination_refund_tx_hash : null,
         ]
       );
     }
 
-    // Commit the transaction
     await analysisPool.query("COMMIT");
-    console.log(
-      `Inserted ${result.rowCount} new orders into final_orders_dup`
-    );
+    console.log(`Inserted ${result.rowCount} new orders into final_orders_dup`);
   } catch (err) {
     await analysisPool.query("ROLLBACK");
     console.error("Error populating final_orders_dup:", err);
   }
 };
 
-// Initialize table and populate data
-initTable().then(() => populateOrderAnalysis());
+// Define the request body interface for timeframe filtering
+interface TimeframeRequestBody {
+  start_time?: string;
+  end_time?: string;
+}
 
+// List of supported chains
+const supportedChains = [
+  'ethereum_sepolia',
+  'base_sepolia',
+  'starknet_sepolia',
+  'monad_testnet',
+  'hyperliquid_testnet',
+  'citrea_testnet',
+  'bitcoin_testnet',
+  'arbitrum_sepolia'
+];
+
+// Handler to get average durations for all chain combinations and last updated timestamp
+const getChainCombinationAverages = async (req: Request<{}, {}, TimeframeRequestBody>, res: Response, next: NextFunction): Promise<void> => {
+  const { start_time, end_time } = req.body;
+
+  // Default to last 30 days if timeframe not provided
+  const defaultEndTime = new Date().toISOString();
+  const defaultStartTime = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  const queryStartTime = start_time || defaultStartTime;
+  const queryEndTime = end_time || defaultEndTime;
+
+  // Validate date formats
+  const isValidISODate = (date: string) => !isNaN(Date.parse(date));
+  if (start_time && !isValidISODate(start_time) || end_time && !isValidISODate(end_time)) {
+    res.status(400).json({ error: 'Invalid date format' });
+    return;
+  }
+
+  const query = `
+    SELECT
+      source_chain,
+      destination_chain,
+      COUNT(*) AS total_orders,
+      AVG(CASE WHEN user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (user_init - created_at)), 0) END) AS avg_user_init_duration,
+      AVG(CASE 
+        WHEN cobi_init IS NOT NULL 
+        AND user_init IS NOT NULL 
+        AND (user_redeem IS NOT NULL OR cobi_redeem IS NOT NULL) 
+        AND user_refund IS NULL 
+        AND cobi_refund IS NULL 
+        THEN GREATEST(EXTRACT(EPOCH FROM (cobi_init - user_init)), 0) 
+      END) AS avg_cobi_init_duration,
+      AVG(CASE WHEN user_redeem IS NOT NULL AND user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (user_redeem - cobi_init)), 0) END) AS avg_user_redeem_duration,
+      AVG(CASE WHEN user_refund IS NOT NULL AND user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (user_refund - user_init)), 0) END) AS avg_user_refund_duration,
+      AVG(CASE WHEN cobi_redeem IS NOT NULL AND cobi_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_redeem - cobi_init)), 0) END) AS avg_cobi_redeem_duration,
+      AVG(CASE WHEN cobi_refund IS NOT NULL AND cobi_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_refund - cobi_init)), 0) END) AS avg_cobi_refund_duration
+    FROM final_orders_dup
+    WHERE created_at BETWEEN $1 AND $2
+      AND (
+        user_init IS NOT NULL OR
+        cobi_init IS NOT NULL OR
+        user_redeem IS NOT NULL OR
+        user_refund IS NOT NULL OR
+        cobi_redeem IS NOT NULL OR
+        cobi_refund IS NOT NULL
+      )
+      AND source_chain = ANY($3)
+      AND destination_chain = ANY($4)
+    GROUP BY source_chain, destination_chain
+    ORDER BY source_chain, destination_chain;
+  `;
+
+  const lastUpdatedQuery = `
+    SELECT MAX(GREATEST(
+      COALESCE(user_init, '1970-01-01'::timestamp with time zone),
+      COALESCE(user_redeem, '1970-01-01'::timestamp with time zone),
+      COALESCE(user_refund, '1970-01-01'::timestamp with time zone),
+      COALESCE(cobi_init, '1970-01-01'::timestamp with time zone),
+      COALESCE(cobi_redeem, '1970-01-01'::timestamp with time zone),
+      COALESCE(cobi_refund, '1970-01-01'::timestamp with time zone)
+    )) AS last_updated
+    FROM final_orders_dup
+    WHERE (
+      (user_init_block_number IS NOT NULL AND user_init IS NOT NULL) OR
+      (user_redeem_block_number IS NOT NULL AND user_redeem IS NOT NULL) OR
+      (user_refund_block_number IS NOT NULL AND user_refund IS NOT NULL) OR
+      (cobi_init_block_number IS NOT NULL AND cobi_init IS NOT NULL) OR
+      (cobi_redeem_block_number IS NOT NULL AND cobi_redeem IS NOT NULL) OR
+      (cobi_refund_block_number IS NOT NULL AND cobi_refund IS NOT NULL)
+    );
+  `;
+
+  try {
+    const result = await analysisPool.query(query, [
+      queryStartTime,
+      queryEndTime,
+      supportedChains,
+      supportedChains
+    ]);
+
+    const lastUpdatedResult = await analysisPool.query(lastUpdatedQuery);
+    const lastUpdated = lastUpdatedResult.rows[0]?.last_updated?.toISOString() || '1970-01-01T00:00:00.000Z';
+
+    const averagesByChain = result.rows.reduce((acc: any, row: any) => {
+      const key = `${row.source_chain}-${row.destination_chain}`;
+      acc[key] = {
+        total_orders: parseInt(row.total_orders, 10),
+        avg_user_init_duration: row.avg_user_init_duration ? parseFloat(row.avg_user_init_duration) : null,
+        avg_cobi_init_duration: row.avg_cobi_init_duration ? parseFloat(row.avg_cobi_init_duration) : null,
+        avg_user_redeem_duration: row.avg_user_redeem_duration ? parseFloat(row.avg_user_redeem_duration) : null,
+        avg_user_refund_duration: row.avg_user_refund_duration ? parseFloat(row.avg_user_refund_duration) : null,
+        avg_cobi_redeem_duration: row.avg_cobi_redeem_duration ? parseFloat(row.avg_cobi_redeem_duration) : null,
+        avg_cobi_refund_duration: row.avg_cobi_refund_duration ? parseFloat(row.avg_cobi_refund_duration) : null
+      };
+      return acc;
+    }, {});
+
+    const chainCombinations: any = {};
+    supportedChains.forEach(source => {
+      supportedChains.forEach(destination => {
+        const key = `${source}-${destination}`;
+        chainCombinations[key] = averagesByChain[key] || {
+          total_orders: 0,
+          avg_user_init_duration: null,
+          avg_cobi_init_duration: null,
+          avg_user_redeem_duration: null,
+          avg_user_refund_duration: null,
+          avg_cobi_redeem_duration: null,
+          avg_cobi_refund_duration: null
+        };
+      });
+    });
+
+    res.json({
+      message: 'Average durations for all chain combinations (in seconds)',
+      last_updated: lastUpdated,
+      averages: chainCombinations
+    });
+  } catch (err) {
+    console.error('Error calculating chain combination averages:', err);
+    res.status(500).json({ error: 'Database query failed' });
+  }
+};
+
+// Handler to get individual orders for all chain combinations in a timeframe
+const getAllIndividualOrders = async (req: Request<{}, {}, TimeframeRequestBody>, res: Response, next: NextFunction): Promise<void> => {
+  const { start_time, end_time } = req.body;
+
+  const defaultEndTime = new Date().toISOString();
+  const defaultStartTime = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  const queryStartTime = start_time || defaultStartTime;
+  const queryEndTime = end_time || defaultEndTime;
+
+  const isValidISODate = (date: string) => !isNaN(Date.parse(date));
+  if (start_time && !isValidISODate(start_time) || end_time && !isValidISODate(end_time)) {
+    res.status(400).json({ error: 'Invalid date format' });
+    return;
+  }
+
+  const query = `
+    SELECT
+      source_chain,
+      destination_chain,
+      create_order_id,
+      created_at,
+      CASE WHEN user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (user_init - created_at)), 0) END AS user_init_duration,
+      CASE WHEN cobi_init IS NOT NULL AND user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_init - user_init)), 0) END AS cobi_init_duration,
+      CASE WHEN user_redeem IS NOT NULL AND user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (user_redeem - cobi_init)), 0) END AS user_redeem_duration,
+      CASE WHEN user_refund IS NOT NULL AND user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (user_refund - user_init)), 0) END AS user_refund_duration,
+      CASE WHEN cobi_redeem IS NOT NULL AND cobi_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_redeem - cobi_init)), 0) END AS cobi_redeem_duration,
+      CASE WHEN cobi_refund IS NOT NULL AND cobi_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_refund - cobi_init)), 0) END AS cobi_refund_duration,
+      (
+        COALESCE(CASE WHEN user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (user_init - created_at)), 0) END, 0) +
+        COALESCE(CASE WHEN cobi_init IS NOT NULL AND user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_init - user_init)), 0) END, 0) +
+        COALESCE(CASE WHEN user_redeem IS NOT NULL AND user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (user_redeem - cobi_init)), 0) END, 0) +
+        COALESCE(CASE WHEN user_refund IS NOT NULL AND user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (user_refund - user_init)), 0) END, 0) +
+        COALESCE(CASE WHEN cobi_redeem IS NOT NULL AND cobi_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_redeem - cobi_init)), 0) END, 0) +
+        COALESCE(CASE WHEN cobi_refund IS NOT NULL AND cobi_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_refund - cobi_init)), 0) END, 0)
+      ) AS overall_duration
+    FROM final_orders_dup
+    WHERE created_at BETWEEN $1 AND $2
+      AND (
+        user_init IS NOT NULL OR
+        cobi_init IS NOT NULL OR
+        user_redeem IS NOT NULL OR
+        user_refund IS NOT NULL OR
+        cobi_redeem IS NOT NULL OR
+        cobi_refund IS NOT NULL
+      )
+      AND source_chain = ANY($3)
+      AND destination_chain = ANY($4)
+    ORDER BY source_chain, destination_chain, created_at ASC;
+  `;
+
+  try {
+    const result = await analysisPool.query(query, [
+      queryStartTime,
+      queryEndTime,
+      supportedChains,
+      supportedChains
+    ]);
+
+    if (result.rows.length === 0) {
+      res.status(404).json({ error: 'No orders found with timestamps in the given range' });
+      return;
+    }
+
+    const ordersByChain = result.rows.reduce((acc: any, order: any) => {
+      const key = `${order.source_chain}-${order.destination_chain}`;
+      if (!acc[key]) {
+        acc[key] = [];
+      }
+      acc[key].push({
+        create_order_id: order.create_order_id,
+        created_at: order.created_at.toISOString(),
+        durations: {
+          user_init_duration: order.user_init_duration ? parseFloat(order.user_init_duration) : null,
+          cobi_init_duration: order.cobi_init_duration ? parseFloat(order.cobi_init_duration) : null,
+          user_redeem_duration: order.user_redeem_duration ? parseFloat(order.user_redeem_duration) : null,
+          user_refund_duration: order.user_refund_duration ? parseFloat(order.user_refund_duration) : null,
+          cobi_redeem_duration: order.cobi_redeem_duration ? parseFloat(order.cobi_redeem_duration) : null,
+          cobi_refund_duration: order.cobi_refund_duration ? parseFloat(order.cobi_refund_duration) : null,
+          overall_duration: order.overall_duration ? parseFloat(order.overall_duration) : null
+        }
+      });
+      return acc;
+    }, {});
+
+    res.json({
+      message: 'Individual order durations for all chain combinations (in seconds)',
+      orders: ordersByChain
+    });
+  } catch (err) {
+    console.error('Error fetching individual orders:', err);
+    res.status(500).json({ error: 'Database query failed' });
+  }
+};
+
+// Handler for syncing orders
+const syncOrders = async (req: Request, res: Response): Promise<void> => {
+  try {
+    await initTable();
+    await populateOrderAnalysis();
+    res.status(200).json({ message: 'Order sync completed successfully' });
+  } catch (err) {
+    console.error('Error during order sync:', err);
+    res.status(500).json({ error: 'Order sync failed' });
+  }
+};
+
+// Routes
+app.post('/averages', getChainCombinationAverages);
+app.post('/orders/all', getAllIndividualOrders);
+app.post('/sync', syncOrders);
+
+// Initialize table and start server
 const port = process.env.PORT || 3000;
-app.listen(port, () => {
-  console.log(`Backend running on http://localhost:${port}`);
+initTable().then(() => {
+  app.listen(port, () => {
+    console.log(`Backend running on http://localhost:${port}`);
+  });
+}).catch(err => {
+  console.error('Failed to initialize table:', err);
+  process.exit(1);
 });
-
-
-// fetch the timestamps
-// SELECT *
-// FROM final_orders_dup
-// WHERE (
-//     (user_init_block_number IS NOT NULL AND user_init IS NULL) OR
-//     (user_redeem_block_number IS NOT NULL AND user_redeem IS NULL) OR
-//     (user_refund_block_number IS NOT NULL AND user_refund IS NULL) OR
-//     (cobi_init_block_number IS NOT NULL AND cobi_init IS NULL) OR
-//     (cobi_redeem_block_number IS NOT NULL AND cobi_redeem IS NULL) OR
-//     (cobi_refund_block_number IS NOT NULL AND cobi_refund IS NULL)
-// );
