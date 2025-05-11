@@ -30,7 +30,7 @@ const analysisPool = new Pool({
 // Initialize small_test_table
 const initTable = async () => {
   const createTableQuery = `
-      CREATE TABLE IF NOT EXISTS small_orders_test (
+      CREATE TABLE IF NOT EXISTS final_orders_dup (
         id SERIAL PRIMARY KEY,
         create_order_id TEXT NOT NULL UNIQUE,
         source_swap_id TEXT NOT NULL,
@@ -39,17 +39,11 @@ const initTable = async () => {
         source_chain TEXT NOT NULL,
         destination_chain TEXT NOT NULL,
         user_init TIMESTAMP WITH TIME ZONE,
-        user_init_tx_time TIMESTAMP WITH TIME ZONE,
         cobi_init TIMESTAMP WITH TIME ZONE,
-        cobi_init_tx_time TIMESTAMP WITH TIME ZONE,
         user_redeem TIMESTAMP WITH TIME ZONE,
-        user_redeem_tx_time TIMESTAMP WITH TIME ZONE,
         cobi_redeem TIMESTAMP WITH TIME ZONE,
-        cobi_redeem_tx_time TIMESTAMP WITH TIME ZONE,
         user_refund TIMESTAMP WITH TIME ZONE,
-        user_refund_tx_time TIMESTAMP WITH TIME ZONE,
         cobi_refund TIMESTAMP WITH TIME ZONE,
-        cobi_refund_tx_time TIMESTAMP WITH TIME ZONE,
         secret_hash TEXT,
         user_init_block_number BIGINT,
         user_redeem_block_number BIGINT,
@@ -68,24 +62,24 @@ const initTable = async () => {
   try {
     await analysisPool.query(createTableQuery);
     console.log(
-      "small_test_table table ensured with TIMESTAMPTZ columns, secret_hash, block numbers, and chain columns"
+      "final_orders_dup table ensured with TIMESTAMPTZ columns, secret_hash, block numbers, and chain columns"
     );
   } catch (err) {
-    console.error("Failed to ensure small_test_table table:", err);
+    console.error("Failed to ensure final_orders_dup table:", err);
   }
 };
 
-// Populate small_orders_test with new completed orders from stage_db
+// Populate final_orders_dup with new completed orders from stage_db
 const populateOrderAnalysis = async () => {
   try {
-    // Get the last synced timestamp from small_orders_test
+    // Get the last synced timestamp from final_orders_dup
     //   const lastSyncResult = await analysisPool.query(
-    //     "SELECT MAX(created_at) as last_synced FROM small_orders_test"
+    //     "SELECT MAX(created_at) as last_synced FROM final_orders_dup"
     //   );
     //   const lastSynced = lastSyncResult.rows[0].last_synced || "1970-01-01";
 
     // CHANGE 1: Added s1.initiate_tx_hash and s2.initiate_tx_hash to the SELECT query
-    // Reason: These fields are needed for user_init_tx_hash and cobi_init_tx_hash in small_orders_test
+    // Reason: These fields are needed for user_init_tx_hash and cobi_init_tx_hash in final_orders_dup
     const query = `
           SELECT DISTINCT
             mo.create_order_id,
@@ -95,14 +89,14 @@ const populateOrderAnalysis = async () => {
             co.source_chain,
             co.destination_chain,
             s1.updated_at AS source_updated_at,
-            s1.initiate_tx_hash AS source_init_tx_hash,  -- Added for user_init_tx_hash
+            s1.initiate_tx_hash AS source_init_tx_hash,
             s1.redeem_tx_hash AS source_redeem_tx_hash,
             s1.refund_tx_hash AS source_refund_tx_hash,
             s1.initiate_block_number AS source_init_block_number,
             s1.redeem_block_number AS source_redeem_block_number,
             s1.refund_block_number AS source_refund_block_number,
             s2.updated_at AS destination_updated_at,
-            s2.initiate_tx_hash AS destination_init_tx_hash,  -- Added for cobi_init_tx_hash
+            s2.initiate_tx_hash AS destination_init_tx_hash,
             s2.redeem_tx_hash AS destination_redeem_tx_hash,
             s2.refund_tx_hash AS destination_refund_tx_hash,
             s2.initiate_block_number AS destination_init_block_number,
@@ -117,8 +111,6 @@ const populateOrderAnalysis = async () => {
             OR s1.refund_tx_hash IS NOT NULL AND s1.refund_tx_hash != '')
             AND (s2.redeem_tx_hash IS NOT NULL AND s2.redeem_tx_hash != '' 
             OR s2.refund_tx_hash IS NOT NULL AND s2.refund_tx_hash != '')
-            AND co.created_at BETWEEN '2025-05-07' AND '2025-05-09';
-
         `;
 
     // Set UTC time zone for stage_db query
@@ -126,25 +118,18 @@ const populateOrderAnalysis = async () => {
 
     // Query stage_db for new completed orders
     const result = await stagePool.query(query);
-    //   const result = await stagePool.query(query, [lastSynced]);
-    console.log(
-      `Retrieved ${result.rowCount} new completed orders from stage_db`
-    );
-
+   
     if (result.rowCount === 0) return;
 
-    // Start a transaction
+
     await analysisPool.query("BEGIN");
 
-    // Insert new results into garden_interchain_analysis.small_orders_test
-    // Insert new results into garden_interchain_analysis.small_orders_test
+
     for (const row of result.rows) {
-      // CHANGE 2: Updated transaction hash fields to use row.<field> ? row.<field> : null
-      // Reason: Ensures explicit assignment of transaction hashes, setting to null if undefined
-      // Keeps user_init_tx_time, user_redeem_tx_time, etc., as null per user request
+      
       await analysisPool.query(
         `
-          INSERT INTO small_orders_test (
+          INSERT INTO final_orders_dup (
             create_order_id, source_swap_id, destination_swap_id, created_at,
             source_chain, destination_chain,
             user_init, cobi_init, user_redeem, cobi_redeem, user_refund, cobi_refund,
@@ -152,12 +137,10 @@ const populateOrderAnalysis = async () => {
             user_init_block_number, user_redeem_block_number, user_refund_block_number,
             cobi_init_block_number, cobi_redeem_block_number, cobi_refund_block_number,
             user_init_tx_hash, user_redeem_tx_hash, user_refund_tx_hash,
-            cobi_init_tx_hash, cobi_redeem_tx_hash, cobi_refund_tx_hash,
-            user_init_tx_time, user_redeem_tx_time, user_refund_tx_time,
-            cobi_init_tx_time, cobi_redeem_tx_time, cobi_refund_tx_time
+            cobi_init_tx_hash, cobi_redeem_tx_hash, cobi_refund_tx_hash
           )
           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19,
-                  $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31)
+                  $20, $21, $22, $23, $24, $25)
           ON CONFLICT (create_order_id) DO NOTHING
         `,
         [
@@ -186,12 +169,6 @@ const populateOrderAnalysis = async () => {
           row.destination_init_tx_hash ? row.destination_init_tx_hash : null, // cobi_init_tx_hash
           row.destination_redeem_tx_hash ? row.destination_redeem_tx_hash : null, // cobi_redeem_tx_hash
           row.destination_refund_tx_hash ? row.destination_refund_tx_hash : null, // cobi_refund_tx_hash
-          null, // user_init_tx_time (to be updated by script)
-          null, // user_redeem_tx_time (to be updated by script)
-          null, // user_refund_tx_time (to be updated by script)
-          null, // cobi_init_tx_time (to be updated by script)
-          null, // cobi_redeem_tx_time (to be updated by script)
-          null, // cobi_refund_tx_time (to be updated by script)
         ]
       );
     }
@@ -199,11 +176,11 @@ const populateOrderAnalysis = async () => {
     // Commit the transaction
     await analysisPool.query("COMMIT");
     console.log(
-      `Inserted ${result.rowCount} new orders into small_orders_test`
+      `Inserted ${result.rowCount} new orders into final_orders_dup`
     );
   } catch (err) {
     await analysisPool.query("ROLLBACK");
-    console.error("Error populating small_orders_test:", err);
+    console.error("Error populating final_orders_dup:", err);
   }
 };
 
@@ -214,3 +191,16 @@ const port = process.env.PORT || 3000;
 app.listen(port, () => {
   console.log(`Backend running on http://localhost:${port}`);
 });
+
+
+// fetch the timestamps
+// SELECT *
+// FROM final_orders_dup
+// WHERE (
+//     (user_init_block_number IS NOT NULL AND user_init IS NULL) OR
+//     (user_redeem_block_number IS NOT NULL AND user_redeem IS NULL) OR
+//     (user_refund_block_number IS NOT NULL AND user_refund IS NULL) OR
+//     (cobi_init_block_number IS NOT NULL AND cobi_init IS NULL) OR
+//     (cobi_redeem_block_number IS NOT NULL AND cobi_redeem IS NULL) OR
+//     (cobi_refund_block_number IS NOT NULL AND cobi_refund IS NULL)
+// );
