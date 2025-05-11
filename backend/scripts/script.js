@@ -4,7 +4,7 @@ import { Alchemy, Network } from 'alchemy-sdk';
 import axios from 'axios';
 import { ethers } from 'ethers';
 import dotenv from 'dotenv';
-import cron from 'node-cron'; // Added for cron scheduling
+// import cron from 'node-cron'; // Added for cron scheduling
 
 dotenv.config();
 
@@ -211,7 +211,7 @@ const getTimestampForBlock = async (chain, blockNumber) => {
   return null;
 };
 
-// Function to update timestamps in limited_order_test for specific order IDs
+// Function to update timestamps in orders_final for specific order IDs
 const updateTimestampsForOrders = async (orderIds) => {
   if (!orderIds || orderIds.length === 0) {
     console.log('No order IDs provided for timestamp update');
@@ -228,7 +228,7 @@ const updateTimestampsForOrders = async (orderIds) => {
              user_redeem_block_number, user_refund_block_number,
              cobi_redeem_block_number, cobi_refund_block_number,
              create_order_id
-      FROM limited_order_test
+      FROM orders_final
       WHERE create_order_id = ANY($1)
         AND (
           (user_init_block_number IS NOT NULL AND user_init IS NULL) OR
@@ -240,7 +240,7 @@ const updateTimestampsForOrders = async (orderIds) => {
         )
     `;
     const result = await analysisPool.query(query, [orderIds]);
-    console.log(`Found ${result.rowCount} rows in limited_order_test to update timestamps`);
+    console.log(`Found ${result.rowCount} rows in orders_final to update timestamps`);
 
     let successfulUpdates = 0;
     let failedUpdates = [];
@@ -320,7 +320,7 @@ const updateTimestampsForOrders = async (orderIds) => {
 
       if (hasChanges) {
         const updateQuery = `
-          UPDATE limited_order_test
+          UPDATE orders_final
           SET user_init = $1::timestamp with time zone,
               cobi_init = $2::timestamp with time zone,
               user_redeem = $3::timestamp with time zone,
@@ -351,7 +351,7 @@ const updateTimestampsForOrders = async (orderIds) => {
       console.log(`Failed orders: ${failedUpdates.join(', ')}`);
     }
   } catch (err) {
-    console.error('Error updating timestamps in limited_order_test:', err);
+    console.error('Error updating timestamps in orders_final:', err);
     throw err;
   }
 };
@@ -361,7 +361,7 @@ async function main() {
   try {
     const orderIdsQuery = `
       SELECT create_order_id
-      FROM limited_order_test
+      FROM orders_final
       WHERE (
         (user_init_block_number IS NOT NULL AND user_init IS NULL) OR
         (user_redeem_block_number IS NOT NULL AND user_redeem IS NULL) OR
@@ -390,37 +390,37 @@ async function main() {
   }
 }
 
-// Cron job for periodic execution (runs every hour)
-cron.schedule('0 * * * *', async () => {
-  console.log('Running timestamp update cron job at', new Date().toISOString());
-  try {
-    const orderIdsQuery = `
-      SELECT create_order_id
-      FROM limited_order_test
-      WHERE (
-        (user_init_block_number IS NOT NULL AND user_init IS NULL) OR
-        (user_redeem_block_number IS NOT NULL AND user_redeem IS NULL) OR
-        (user_refund_block_number IS NOT NULL AND user_refund IS NULL) OR
-        (cobi_init_block_number IS NOT NULL AND cobi_init IS NULL) OR
-        (cobi_redeem_block_number IS NOT NULL AND cobi_redeem IS NULL) OR
-        (cobi_refund_block_number IS NOT NULL AND cobi_refund IS NULL)
-      )
-    `;
-    const orderIdsResult = await analysisPool.query(orderIdsQuery);
-    const orderIds = orderIdsResult.rows.map(row => row.create_order_id);
+// // Cron job for periodic execution (runs every hour)
+// cron.schedule('0 * * * *', async () => {
+//   console.log('Running timestamp update cron job at', new Date().toISOString());
+//   try {
+//     const orderIdsQuery = `
+//       SELECT create_order_id
+//       FROM orders_final
+//       WHERE (
+//         (user_init_block_number IS NOT NULL AND user_init IS NULL) OR
+//         (user_redeem_block_number IS NOT NULL AND user_redeem IS NULL) OR
+//         (user_refund_block_number IS NOT NULL AND user_refund IS NULL) OR
+//         (cobi_init_block_number IS NOT NULL AND cobi_init IS NULL) OR
+//         (cobi_redeem_block_number IS NOT NULL AND cobi_redeem IS NULL) OR
+//         (cobi_refund_block_number IS NOT NULL AND cobi_refund IS NULL)
+//       )
+//     `;
+//     const orderIdsResult = await analysisPool.query(orderIdsQuery);
+//     const orderIds = orderIdsResult.rows.map(row => row.create_order_id);
 
-    if (orderIds.length === 0) {
-      console.log('No orders found with missing timestamps.');
-      return;
-    }
+//     if (orderIds.length === 0) {
+//       console.log('No orders found with missing timestamps.');
+//       return;
+//     }
 
-    console.log(`Cron: Updating timestamps for ${orderIds.length} orders:`, orderIds);
-    await updateTimestampsForOrders(orderIds);
-  } catch (err) {
-    console.error('Cron: Error running timestamp updater:', err);
-  }
-  // Do not close analysisPool here to keep it open for subsequent cron runs
-});
+//     console.log(`Cron: Updating timestamps for ${orderIds.length} orders:`, orderIds);
+//     await updateTimestampsForOrders(orderIds);
+//   } catch (err) {
+//     console.error('Cron: Error running timestamp updater:', err);
+//   }
+//   // Do not close analysisPool here to keep it open for subsequent cron runs
+// });
 
 // Run main immediately for one-off execution
 main().catch(err => {
