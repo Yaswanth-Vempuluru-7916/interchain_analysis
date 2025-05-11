@@ -119,6 +119,10 @@ const App = () => {
           }
           .react-datepicker {
             font-family: sans-serif !important;
+            border: 1px solid #d1d5db !important;
+            border-radius: 0.5rem !important;
+            background-color: white !important;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1) !important;
           }
           .react-datepicker__input-container input {
             width: 100%;
@@ -133,6 +137,42 @@ const App = () => {
             border-color: #F06292;
             outline: none;
             box-shadow: 0 0 0 2px rgba(240, 98, 146, 0.3);
+          }
+          .react-datepicker__header {
+            background-color: #F06292 !important;
+            border-bottom: none !important;
+            color: white !important;
+            padding: 0.5rem !important;
+          }
+          .react-datepicker__day-name,
+          .react-datepicker__day,
+          .react-datepicker__time-list-item {
+            color: #1f2937 !important;
+          }
+          .react-datepicker__day--selected,
+          .react-datepicker__day--keyboard-selected,
+          .react-datepicker__time-list-item--selected {
+            background-color: #F06292 !important;
+            color: white !important;
+            border-radius: 0.25rem !important;
+          }
+          .react-datepicker__day:hover,
+          .react-datepicker__time-list-item:hover {
+            background-color: #f0f0f0 !important;
+            border-radius: 0.25rem !important;
+          }
+          .react-datepicker__time-container {
+            border-left: 1px solid #d1d5db !important;
+          }
+          .react-datepicker__time-list {
+            background-color: white !important;
+          }
+          .react-datepicker__navigation-icon::before {
+            border-color: white !important;
+          }
+          .react-datepicker__current-month,
+          .react-datepicker-time__header {
+            color: white !important;
           }
         `}
       </style>
@@ -211,18 +251,20 @@ const App = () => {
                   </tr>
                 </thead>
                 <tbody>
-                  {Object.keys(averagesData).map((chainPair, idx) => (
-                    <tr key={chainPair} className={`${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'} hover:bg-gray-100 transition-all duration-300 shadow-sm`}>
-                      <td className="py-4 px-6 border-b border-gray-200 font-medium text-gray-800">{chainPair}</td>
-                      <td className="py-4 px-6 border-b border-gray-200 text-[#F06292] font-semibold">{averagesData[chainPair].total_orders}</td>
-                      <td className="py-4 px-6 border-b border-gray-200 text-gray-700">{formatDecimal(averagesData[chainPair].avg_user_init_duration)}</td>
-                      <td className="py-4 px-6 border-b border-gray-200 text-gray-700">{formatDecimal(averagesData[chainPair].avg_cobi_init_duration)}</td>
-                      <td className="py-4 px-6 border-b border-gray-200 text-gray-700">{formatDecimal(averagesData[chainPair].avg_user_redeem_duration)}</td>
-                      <td className="py-4 px-6 border-b border-gray-200 text-gray-700">{formatDecimal(averagesData[chainPair].avg_cobi_redeem_duration)}</td>
-                      <td className="py-4 px-6 border-b border-gray-200 text-gray-700">{formatDecimal(averagesData[chainPair].avg_user_refund_duration)}</td>
-                      <td className="py-4 px-6 border-b border-gray-200 text-gray-700">{formatDecimal(averagesData[chainPair].avg_cobi_refund_duration)}</td>
-                    </tr>
-                  ))}
+                  {Object.keys(averagesData)
+                    .filter((chainPair) => averagesData[chainPair].total_orders > 0) // Filter out rows where total_orders is 0
+                    .map((chainPair, idx) => (
+                      <tr key={chainPair} className={`${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'} hover:bg-gray-100 transition-all duration-300 shadow-sm`}>
+                        <td className="py-4 px-6 border-b border-gray-200 font-medium text-gray-800">{chainPair}</td>
+                        <td className="py-4 px-6 border-b border-gray-200 text-[#F06292] font-semibold">{averagesData[chainPair].total_orders}</td>
+                        <td className="py-4 px-6 border-b border-gray-200 text-gray-700">{formatDecimal(averagesData[chainPair].avg_user_init_duration)}</td>
+                        <td className="py-4 px-6 border-b border-gray-200 text-gray-700">{formatDecimal(averagesData[chainPair].avg_cobi_init_duration)}</td>
+                        <td className="py-4 px-6 border-b border-gray-200 text-gray-700">{formatDecimal(averagesData[chainPair].avg_user_redeem_duration)}</td>
+                        <td className="py-4 px-6 border-b border-gray-200 text-gray-700">{formatDecimal(averagesData[chainPair].avg_cobi_redeem_duration)}</td>
+                        <td className="py-4 px-6 border-b border-gray-200 text-gray-700">{formatDecimal(averagesData[chainPair].avg_user_refund_duration)}</td>
+                        <td className="py-4 px-6 border-b border-gray-200 text-gray-700">{formatDecimal(averagesData[chainPair].avg_cobi_refund_duration)}</td>
+                      </tr>
+                    ))}
                 </tbody>
               </table>
             </div>
