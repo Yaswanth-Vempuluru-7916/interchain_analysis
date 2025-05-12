@@ -47,6 +47,8 @@ const App = () => {
   const [lastUpdated, setLastUpdated] = useState('');
   const [error, setError] = useState('');
   const [isFetching, setIsFetching] = useState(false);
+  // const [isSyncing, setIsSyncing] = useState(false); // New state for syncing
+  // const [syncMessage, setSyncMessage] = useState(''); // New state for sync feedback
   const [copiedOrderId, setCopiedOrderId] = useState<string | null>(null);
 
   const fetchData = async () => {
@@ -82,6 +84,24 @@ const App = () => {
       setIsFetching(false);
     }
   };
+
+  // // New function to handle sync orders
+  // const handleSyncOrders = async () => {
+  //   setIsSyncing(true);
+  //   setSyncMessage('');
+  //   setError('');
+
+  //   try {
+  //     await axios.post('http://localhost:3000/sync');
+  //     setSyncMessage('Orders synced successfully. Timestamps are being updated in the background.');
+  //     await fetchData(); // Refresh data immediately after sync
+  //   } catch (err) {
+  //     setError('Failed to sync orders');
+  //     console.error('Sync error:', err);
+  //   } finally {
+  //     setIsSyncing(false);
+  //   }
+  // };
 
   useEffect(() => {
     fetchData();
@@ -215,19 +235,30 @@ const App = () => {
               {lastUpdated ? new Date(lastUpdated).toLocaleString() : 'N/A'}
             </span>
           </div>
-          <div className="flex flex-col">
+          <div className="flex flex-col gap-3">
             <button
               type="submit"
               className="bg-[#F06292] hover:bg-[#F06292]/80 text-white font-bold py-3 px-8 rounded-lg transform hover:scale-105 transition-all duration-300 shadow-lg cursor-pointer"
             >
               Fetch Data
             </button>
+            {/* <button
+              type="button"
+              onClick={handleSyncOrders}
+              disabled={isSyncing}
+              className={`bg-[#4CAF50] hover:bg-[#4CAF50]/80 text-white font-bold py-3 px-8 rounded-lg transform hover:scale-105 transition-all duration-300 shadow-lg cursor-pointer ${isSyncing ? 'opacity-50 cursor-not-allowed' : ''}`}
+            >
+              {isSyncing ? 'Syncing...' : 'Fetch Latest Orders'}
+            </button> */}
           </div>
         </form>
         
         {error && (
           <div className="text-red-600 bg-red-100/50 border border-red-300 p-4 rounded-lg animate-pulse">{error}</div>
         )}
+        {/* {syncMessage && (
+          <div className="text-green-600 bg-green-100/50 border border-green-300 p-4 rounded-lg animate-pulse">{syncMessage}</div>
+        )} */}
       </div>
 
       <div className="max-w-7xl mx-auto mb-12">
