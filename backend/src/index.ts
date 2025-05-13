@@ -4,6 +4,9 @@ import dotenv from "dotenv";
 import { analysisPool } from "./config/db";
 import { initTable } from "./services/dbService";
 import routes from "./routes";
+// MODIFIED: Import node-cron for scheduling and sync functions
+import cron from "node-cron";
+import { syncOrders, updateTimestamps } from "./controllers/syncController";
 
 dotenv.config();
 
@@ -26,12 +29,44 @@ async function testDbConnection() {
   }
 }
 
+//Schedule syncOrders and updateTimestamps to run every 2 hours
+const scheduleSyncAndUpdate = () => {
+  cron.schedule("0 */2 * * *", async () => {
+    console.log("Running scheduled sync and timestamp update...");
+    try {
+      // Run syncOrders first
+      await syncOrders(
+        { body: {} } as any,
+        {
+          status: () => ({ json: () => {} }),
+          json: () => {},
+        } as any
+      );
+      console.log("Sync completed, proceeding to update timestamps...");
+      // Run updateTimestamps after sync completes
+      await updateTimestamps(
+        { body: {} } as any,
+        {
+          status: () => ({ json: () => {} }),
+          json: () => {},
+        } as any
+      );
+      console.log("Timestamp update completed.");
+    } catch (err: any) {
+      console.error("Error during scheduled sync/update:", err.message);
+    }
+  });
+  console.log("Cron job scheduled to run sync and updateTimestamps every 2 hours.");
+};
+
 const port = process.env.PORT || 3000;
 testDbConnection()
   .then(() => {
     initTable()
       .then(() => {
         app.use("/", routes);
+        //Start cron job after server initialization
+        scheduleSyncAndUpdate();
         app.listen(port, () => {
           console.log(`Backend running on http://localhost:${port}`);
         });
