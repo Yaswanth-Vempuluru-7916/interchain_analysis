@@ -303,7 +303,7 @@ export const updateTimestampsForOrders = async (orderIds: string[]): Promise<voi
     let failedUpdates: string[] = [];
 
     // Process orders in chunks to avoid overwhelming the API
-    const chunkSize = 50; // Adjust based on API rate limits
+    const chunkSize = 5; // Adjust based on API rate limits
     for (let i = 0; i < result.rows.length; i += chunkSize) {
       const chunk = result.rows.slice(i, i + chunkSize);
       const updatePromises = chunk.map(async (row: any) => {

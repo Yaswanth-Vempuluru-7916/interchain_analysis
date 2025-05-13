@@ -2,6 +2,7 @@ import express, { Request, Response, NextFunction } from "express";
 import { Pool } from "pg";
 import dotenv from "dotenv";
 import cors from "cors";
+import { updateTimestampsForOrders } from "./updateTimestamps";
 
 dotenv.config();
 
@@ -30,10 +31,10 @@ const analysisPool = new Pool({
   port: Number(process.env.ANALYSIS_DB_PORT),
 });
 
-// Initialize orders_final table
+// Initialize orders_ts_null_dup1 table
 const initTable = async () => {
   const createTableQuery = `
-      CREATE TABLE IF NOT EXISTS orders_final (
+      CREATE TABLE IF NOT EXISTS orders_ts_null_dup1 (
         id SERIAL PRIMARY KEY,
         create_order_id TEXT NOT NULL UNIQUE,
         source_swap_id TEXT NOT NULL,
@@ -65,14 +66,14 @@ const initTable = async () => {
   try {
     await analysisPool.query(createTableQuery);
     console.log(
-      "orders_final table ensured with TIMESTAMPTZ columns, secret_hash, block numbers, and chain columns"
+      "orders_ts_null_dup1 table ensured with TIMESTAMPTZ columns, secret_hash, block numbers, and chain columns"
     );
-  } catch (err) {
-    console.error("Failed to ensure orders_final table:", err);
+  } catch (err: any) {
+    console.error("Failed to ensure orders_ts_null_dup1 table:", err.message);
   }
 };
 
-// Populate orders_final with new completed orders from stage_db
+// Populate orders_ts_null_dup1 with new completed orders from stage_db
 const populateOrderAnalysis = async () => {
   try {
     const query = `
@@ -110,7 +111,7 @@ const populateOrderAnalysis = async () => {
 
     await stagePool.query("SET TIME ZONE 'UTC'");
     const result = await stagePool.query(query);
-   
+
     if (result.rowCount === 0) return;
 
     await analysisPool.query("BEGIN");
@@ -118,7 +119,7 @@ const populateOrderAnalysis = async () => {
     for (const row of result.rows) {
       await analysisPool.query(
         `
-          INSERT INTO orders_final (
+          INSERT INTO orders_ts_null_dup1 (
             create_order_id, source_swap_id, destination_swap_id, created_at,
             source_chain, destination_chain,
             user_init, cobi_init, user_redeem, cobi_redeem, user_refund, cobi_refund,
@@ -163,10 +164,10 @@ const populateOrderAnalysis = async () => {
     }
 
     await analysisPool.query("COMMIT");
-    console.log(`Inserted ${result.rowCount} new orders into orders_final`);
-  } catch (err) {
+    console.log(`Inserted ${result.rowCount} new orders into orders_ts_null_dup1`);
+  } catch (err: any) {
     await analysisPool.query("ROLLBACK");
-    console.error("Error populating orders_final:", err);
+    console.error("Error populating orders_ts_null_dup1:", err.message);
   }
 };
 
@@ -205,7 +206,6 @@ const getChainCombinationAverages = async (req: Request<{}, {}, TimeframeRequest
     return;
   }
 
-  // MODIFIED: Updated query to exclude orders with anomalous durations (> 1.5hr) for user_init, cobi_init, user_redeem, cobi_redeem
   const query = `
     SELECT
       source_chain,
@@ -227,7 +227,7 @@ const getChainCombinationAverages = async (req: Request<{}, {}, TimeframeRequest
       AVG(CASE WHEN user_refund IS NOT NULL AND user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (user_refund - user_init)), 0) END) AS avg_user_refund_duration,
       AVG(CASE WHEN cobi_redeem IS NOT NULL AND cobi_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_redeem - cobi_init)), 0) END) AS avg_cobi_redeem_duration,
       AVG(CASE WHEN cobi_refund IS NOT NULL AND cobi_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_refund - cobi_init)), 0) END) AS avg_cobi_refund_duration
-    FROM orders_final
+    FROM orders_ts_null_dup1
     WHERE created_at BETWEEN $1 AND $2
       AND (
         user_init IS NOT NULL OR
@@ -238,7 +238,7 @@ const getChainCombinationAverages = async (req: Request<{}, {}, TimeframeRequest
         cobi_refund IS NOT NULL
       )
       AND source_chain = ANY($3)
-      AND destination_chain = ANY($4)
+      AND destination_chain = ANY($4) 
       -- MODIFIED: Exclude orders where any of user_init, cobi_init, user_redeem, or cobi_redeem durations exceed ANOMALY_THRESHOLD
       AND (
         (user_init IS NULL OR GREATEST(EXTRACT(EPOCH FROM (user_init - created_at)), 0) <= ${ANOMALY_THRESHOLD})
@@ -259,7 +259,7 @@ const getChainCombinationAverages = async (req: Request<{}, {}, TimeframeRequest
       COALESCE(cobi_redeem, '1970-01-01'::timestamp with time zone),
       COALESCE(cobi_refund, '1970-01-01'::timestamp with time zone)
     )) AS last_updated
-    FROM orders_final
+    FROM orders_ts_null_dup1
     WHERE (
       (user_init_block_number IS NOT NULL AND user_init IS NOT NULL) OR
       (user_redeem_block_number IS NOT NULL AND user_redeem IS NOT NULL) OR
@@ -280,7 +280,7 @@ const getChainCombinationAverages = async (req: Request<{}, {}, TimeframeRequest
 
     const lastUpdatedResult = await analysisPool.query(lastUpdatedQuery);
     const lastUpdated = lastUpdatedResult.rows[0]?.last_updated?.toISOString() || '1970-01-01T00:00:00.000Z';
-
+    
     // MODIFIED: Updated response processing to reflect anomaly-excluded averages
     const averagesByChain = result.rows.reduce((acc: any, row: any) => {
       const key = `${row.source_chain}-${row.destination_chain}`;
@@ -317,8 +317,8 @@ const getChainCombinationAverages = async (req: Request<{}, {}, TimeframeRequest
       last_updated: lastUpdated,
       averages: chainCombinations
     });
-  } catch (err) {
-    console.error('Error calculating chain combination averages:', err);
+  } catch (err: any) {
+    console.error('Error calculating chain combination averages:', err.message);
     res.status(500).json({ error: 'Database query failed' });
   }
 };
@@ -338,7 +338,7 @@ const getAllIndividualOrders = async (req: Request<{}, {}, TimeframeRequestBody>
     return;
   }
 
-  // MODIFIED: Updated query to exclude orders with anomalous durations (> 1.5hr) for user_init, cobi_init, user_redeem, cobi_redeem
+ // MODIFIED: Updated query to exclude orders with anomalous durations (> 1.5hr) for user_init, cobi_init, user_redeem, cobi_redeem
   const query = `
     SELECT
       source_chain,
@@ -349,7 +349,7 @@ const getAllIndividualOrders = async (req: Request<{}, {}, TimeframeRequestBody>
       CASE WHEN cobi_init IS NOT NULL AND user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_init - user_init)), 0) END AS cobi_init_duration,
       CASE WHEN user_redeem IS NOT NULL AND user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (user_redeem - cobi_init)), 0) END AS user_redeem_duration,
       CASE WHEN user_refund IS NOT NULL AND user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (user_refund - user_init)), 0) END AS user_refund_duration,
-      CASE WHEN cobi_redeem IS NOT NULL AND cobi_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_redeem - cobi_init)), 0) END AS cobi_redeem_duration,
+CASE WHEN cobi_redeem IS NOT NULL AND cobi_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_redeem - cobi_init)), 0) END AS cobi_redeem_duration,
       CASE WHEN cobi_refund IS NOT NULL AND cobi_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_refund - cobi_init)), 0) END AS cobi_refund_duration,
       (
         COALESCE(CASE WHEN user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (user_init - created_at)), 0) END, 0) +
@@ -359,7 +359,7 @@ const getAllIndividualOrders = async (req: Request<{}, {}, TimeframeRequestBody>
         COALESCE(CASE WHEN cobi_redeem IS NOT NULL AND cobi_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_redeem - cobi_init)), 0) END, 0) +
         COALESCE(CASE WHEN cobi_refund IS NOT NULL AND cobi_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_refund - cobi_init)), 0) END, 0)
       ) AS overall_duration
-    FROM orders_final
+    FROM orders_ts_null_dup1
     WHERE created_at BETWEEN $1 AND $2
       AND (
         user_init IS NOT NULL OR
@@ -394,7 +394,6 @@ const getAllIndividualOrders = async (req: Request<{}, {}, TimeframeRequestBody>
       return;
     }
 
-    // MODIFIED: Updated response processing to reflect non-anomalous orders
     const ordersByChain = result.rows.reduce((acc: any, order: any) => {
       const key = `${order.source_chain}-${order.destination_chain}`;
       if (!acc[key]) {
@@ -420,13 +419,13 @@ const getAllIndividualOrders = async (req: Request<{}, {}, TimeframeRequestBody>
       message: 'Individual order durations for all chain combinations (in seconds, excluding anomalies)',
       orders: ordersByChain
     });
-  } catch (err) {
-    console.error('Error fetching individual orders:', err);
+  } catch (err: any) {
+    console.error('Error fetching individual orders:', err.message);
     res.status(500).json({ error: 'Database query failed' });
   }
 };
 
-// MODIFIED: New handler to get anomalous orders where any duration exceeds 1.5hr
+// Handler to get anomalous orders where any duration exceeds 1.5hr
 const getAnomalyOrders = async (req: Request<{}, {}, TimeframeRequestBody>, res: Response, next: NextFunction): Promise<void> => {
   const { start_time, end_time } = req.body;
 
@@ -441,7 +440,6 @@ const getAnomalyOrders = async (req: Request<{}, {}, TimeframeRequestBody>, res:
     return;
   }
 
-  // MODIFIED: Query to select only orders with anomalous durations (> 1.5hr) for user_init, cobi_init, user_redeem, or cobi_redeem
   const query = `
     SELECT
       source_chain,
@@ -462,7 +460,7 @@ const getAnomalyOrders = async (req: Request<{}, {}, TimeframeRequestBody>, res:
         COALESCE(CASE WHEN cobi_redeem IS NOT NULL AND cobi_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_redeem - cobi_init)), 0) END, 0) +
         COALESCE(CASE WHEN cobi_refund IS NOT NULL AND cobi_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_refund - cobi_init)), 0) END, 0)
       ) AS overall_duration
-    FROM orders_final
+    FROM orders_ts_null_dup1
     WHERE created_at BETWEEN $1 AND $2
       AND (
         user_init IS NOT NULL OR
@@ -474,7 +472,6 @@ const getAnomalyOrders = async (req: Request<{}, {}, TimeframeRequestBody>, res:
       )
       AND source_chain = ANY($3)
       AND destination_chain = ANY($4)
-      -- MODIFIED: Include only orders where at least one of user_init, cobi_init, user_redeem, or cobi_redeem durations exceeds ANOMALY_THRESHOLD
       AND (
         (user_init IS NOT NULL AND GREATEST(EXTRACT(EPOCH FROM (user_init - created_at)), 0) > ${ANOMALY_THRESHOLD})
         OR (cobi_init IS NOT NULL AND user_init IS NOT NULL AND GREATEST(EXTRACT(EPOCH FROM (cobi_init - user_init)), 0) > ${ANOMALY_THRESHOLD})
@@ -497,7 +494,6 @@ const getAnomalyOrders = async (req: Request<{}, {}, TimeframeRequestBody>, res:
       return;
     }
 
-    // MODIFIED: Process anomalous orders, same structure as /orders/all
     const ordersByChain = result.rows.reduce((acc: any, order: any) => {
       const key = `${order.source_chain}-${order.destination_chain}`;
       if (!acc[key]) {
@@ -523,8 +519,8 @@ const getAnomalyOrders = async (req: Request<{}, {}, TimeframeRequestBody>, res:
       message: 'Anomalous order durations for all chain combinations (in seconds)',
       orders: ordersByChain
     });
-  } catch (err) {
-    console.error('Error fetching anomalous orders:', err);
+  } catch (err: any) {
+    console.error('Error fetching anomalous orders:', err.message);
     res.status(500).json({ error: 'Database query failed' });
   }
 };
@@ -535,26 +531,69 @@ const syncOrders = async (req: Request, res: Response): Promise<void> => {
     await initTable();
     await populateOrderAnalysis();
     res.status(200).json({ message: 'Order sync completed successfully' });
-  } catch (err) {
-    console.error('Error during order sync:', err);
+  } catch (err: any) {
+    console.error('Error during order sync:', err.message);
     res.status(500).json({ error: 'Order sync failed' });
   }
 };
 
+// MODIFIED: Test database connection
+async function testDbConnection() {
+  let client;
+  try {
+    client = await analysisPool.connect();
+    console.log('Database connection successful');
+    const res = await client.query('SELECT NOW()');
+    console.log('Test query result:', res.rows[0]);
+  } catch (err: any) {
+    console.error(`Database connection failed: ${err.message}\nStack: ${err.stack}`);
+    process.exit(1);
+  } finally {
+    if (client) client.release();
+  }
+}
+
 // Routes
 app.post('/averages', getChainCombinationAverages);
 app.post('/orders/all', getAllIndividualOrders);
-// MODIFIED: Added new route for anomalous orders
 app.post('/orders/anomalies', getAnomalyOrders);
 app.post('/sync', syncOrders);
+app.post('/updateTimestamps', async (req: Request, res: Response) => {
+  try {
+    const orderIdsQuery = `
+    SELECT create_order_id
+    FROM orders_ts_null_dup1
+    WHERE (
+    (user_init_block_number IS NOT NULL AND user_init IS NULL) OR
+    (user_redeem_block_number IS NOT NULL AND user_redeem IS NULL) OR
+    (user_refund_block_number IS NOT NULL AND user_refund IS NULL) OR
+    (cobi_init_block_number IS NOT NULL AND cobi_init IS NULL) OR
+    (cobi_redeem_block_number IS NOT NULL AND cobi_redeem IS NULL) OR
+    (cobi_refund_block_number IS NOT NULL AND cobi_refund IS NULL)
+    )
+`;
+    const orderIdsResult = await analysisPool.query(orderIdsQuery);
+    const orderIds = orderIdsResult.rows.map(row => row.create_order_id);
+    await updateTimestampsForOrders(orderIds);
+    res.status(200).json({ message: 'Timestamps updated successfully' });
+  } catch (err: any) {
+    console.error('Error in /updateTimestamps:', err.message);
+    res.status(500).json({ error: 'Failed to update timestamps' });
+  }
+});
 
 // Initialize table and start server
 const port = process.env.PORT || 3000;
-initTable().then(() => {
-  app.listen(port, () => {
-    console.log(`Backend running on http://localhost:${port}`);
+testDbConnection().then(() => {
+  initTable().then(() => {
+    app.listen(port, () => {
+      console.log(`Backend running on http://localhost:${port}`);
+    });
+  }).catch(err => {
+    console.error('Failed to initialize table:', err.message);
+    process.exit(1);
   });
 }).catch(err => {
-  console.error('Failed to initialize table:', err);
+  console.error('Failed to connect to database:', err.message);
   process.exit(1);
 });
