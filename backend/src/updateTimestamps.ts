@@ -7,7 +7,6 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-// Validate environment variables
 const requiredEnvVars = [
   'ANALYSIS_DB_USER',
   'ANALYSIS_DB_HOST',
@@ -19,14 +18,15 @@ const requiredEnvVars = [
   'RPC_URL_STARKNET_SEPOLIA',
   'RPC_URL_MONAD_TESTNET',
   'RPC_URL_HYPERLIQUID_TESTNET',
-  'RPC_URL_BITCOIN_TESTNET'
+  'RPC_URL_BITCOIN_TESTNET',
+  'RPC_URL_BERA_TESTNET',
+  'SUPPORTED_CHAINS',
 ];
 const missingEnvVars = requiredEnvVars.filter(varName => !process.env[varName]);
 if (missingEnvVars.length > 0) {
   console.error('Missing environment variables:', missingEnvVars.join(', '));
   process.exit(1);
 }
-
 // Pool for garden_interchain_analysis
 const analysisPool = new Pool({
   user: process.env.ANALYSIS_DB_USER,
@@ -40,22 +40,31 @@ const analysisPool = new Pool({
 const alchemyInstances = {
   ethereum_sepolia: new Alchemy({ apiKey: process.env.ALCHEMY_TOKEN, network: Network.ETH_SEPOLIA }),
   base_sepolia: new Alchemy({ apiKey: process.env.ALCHEMY_TOKEN, network: Network.BASE_SEPOLIA }),
+  bera_testnet: new Alchemy({
+    apiKey: process.env.ALCHEMY_TOKEN,
+    url: `${process.env.RPC_URL_BERA_TESTNET}/${process.env.ALCHEMY_TOKEN}`,
+  }),
 };
 
 // Citrea provider
 const citreaProvider = new ethers.JsonRpcProvider(process.env.RPC_URL_CITREA_TESTNET);
 
 // Supported chains
-const supportedChains = [
-  'arbitrum_sepolia',
-  'base_sepolia',
-  'bitcoin_testnet',
-  'citrea_testnet',
-  'ethereum_sepolia',
-  'hyperliquid_testnet',
-  'monad_testnet',
-  'starknet_sepolia'
-];
+const supportedChains : string[] =(()=>{
+  const chains = process.env.SUPPORTED_CHAINS;
+  if(!chains){
+    throw new Error('SUPPORTED_CHAINS is not defined in environment variables');
+  }
+  try{
+    const parsed = JSON.parse(chains);
+    if (!Array.isArray(parsed) || !parsed.every(chain => typeof chain === 'string')) {
+      throw new Error('SUPPORTED_CHAINS must be an array of strings');
+    }
+    return parsed;
+  }catch(error:any){
+    throw new Error(`Failed to parse SUPPORTED_CHAINS: ${error.message}`);
+  }
+})();
 interface StarkNetRpcResponse {
   jsonrpc: string;
   id: number;
@@ -106,7 +115,7 @@ const getTimestampForBlock = async (chain: string, blockNumber: number | null): 
     rpcChain = 'ethereum_sepolia';
   }
 
-  if (['ethereum_sepolia', 'base_sepolia'].includes(rpcChain)) {
+  if (['ethereum_sepolia', 'base_sepolia', 'bera_testnet'].includes(rpcChain)) {
     try {
       const alchemy = alchemyInstances[rpcChain as keyof typeof alchemyInstances];
       const block = await alchemy.core.getBlock(Number(blockNumber));
@@ -325,20 +334,10 @@ export const updateTimestampsForOrders = async (orderIds: string[]): Promise<voi
         let cobiRedeemTimestamp = cobi_redeem;
         let cobiRefundTimestamp = cobi_refund;
 
-        const supportedChainsForFetch = [
-          'ethereum_sepolia',
-          'base_sepolia',
-          'starknet_sepolia',
-          'monad_testnet',
-          'hyperliquid_testnet',
-          'citrea_testnet',
-          'bitcoin_testnet',
-          'arbitrum_sepolia'
-        ];
 
         const timestampPromises: Promise<void>[] = [];
 
-        if (supportedChainsForFetch.includes(source_chain)) {
+        if (supportedChains.includes(source_chain)) {
           if (user_init_block_number && !userInitTimestamp) {
             timestampPromises.push(
               getTimestampForBlock(source_chain, user_init_block_number).then(ts => {
@@ -364,7 +363,7 @@ export const updateTimestampsForOrders = async (orderIds: string[]): Promise<voi
           console.warn(`Source chain ${source_chain} not supported for timestamp fetching for order ${create_order_id}`);
         }
 
-        if (supportedChainsForFetch.includes(destination_chain)) {
+        if (supportedChains.includes(destination_chain)) {
           if (cobi_init_block_number && !cobiInitTimestamp) {
             timestampPromises.push(
               getTimestampForBlock(destination_chain, cobi_init_block_number).then(ts => {
