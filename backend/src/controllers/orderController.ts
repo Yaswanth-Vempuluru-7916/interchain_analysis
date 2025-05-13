@@ -67,23 +67,16 @@ export const getChainCombinationAverages = async (
   `;
 
   const lastUpdatedQuery = `
-    SELECT MAX(GREATEST(
-      COALESCE(user_init, '1970-01-01'::timestamp with time zone),
-      COALESCE(user_redeem, '1970-01-01'::timestamp with time zone),
-      COALESCE(user_refund, '1970-01-01'::timestamp with time zone),
-      COALESCE(cobi_init, '1970-01-01'::timestamp with time zone),
-      COALESCE(cobi_redeem, '1970-01-01'::timestamp with time zone),
-      COALESCE(cobi_refund, '1970-01-01'::timestamp with time zone)
-    )) AS last_updated
+    SELECT MAX(created_at) AS last_updated
     FROM orders_final
     WHERE (
-      (user_init_block_number IS NOT NULL AND user_init IS NOT NULL) OR
-      (user_redeem_block_number IS NOT NULL AND user_redeem IS NOT NULL) OR
-      (user_refund_block_number IS NOT NULL AND user_refund IS NOT NULL) OR
-      (cobi_init_block_number IS NOT NULL AND cobi_init IS NOT NULL) OR
-      (cobi_redeem_block_number IS NOT NULL AND cobi_redeem IS NOT NULL) OR
-      (cobi_refund_block_number IS NOT NULL AND cobi_refund IS NOT NULL)
-    );
+        (user_init_block_number IS NOT NULL AND user_init IS NOT NULL) OR
+        (user_redeem_block_number IS NOT NULL AND user_redeem IS NOT NULL) OR
+        (user_refund_block_number IS NOT NULL AND user_refund IS NOT NULL) OR
+        (cobi_init_block_number IS NOT NULL AND cobi_init IS NOT NULL) OR
+        (cobi_redeem_block_number IS NOT NULL AND cobi_redeem IS NOT NULL) OR
+        (cobi_refund_block_number IS NOT NULL AND cobi_refund IS NOT NULL)
+);
   `;
 
   try {
