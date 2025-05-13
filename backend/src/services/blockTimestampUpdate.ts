@@ -16,12 +16,12 @@ const requiredEnvVars = [
   "ANALYSIS_DB_PASSWORD",
   "ANALYSIS_DB_PORT",
   "ALCHEMY_TOKEN",
-  "RPC_URL_CITREA_TESTNET",
-  "RPC_URL_STARKNET_SEPOLIA",
-  "RPC_URL_MONAD_TESTNET",
-  "RPC_URL_HYPERLIQUID_TESTNET",
-  "RPC_URL_BITCOIN_TESTNET",
-  "RPC_URL_BERA_TESTNET",
+  "RPC_URL_CITREA",
+  "RPC_URL_STARKNET",
+  "RPC_URL_MONAD",
+  "RPC_URL_HYPERLIQUID",
+  "RPC_URL_BITCOIN",
+  "RPC_URL_BERA",
   "SUPPORTED_CHAINS",
 ];
 const missingEnvVars = requiredEnvVars.filter((varName) => !process.env[varName]);
@@ -35,11 +35,11 @@ const alchemyInstances = {
   base_sepolia: new Alchemy({ apiKey: process.env.ALCHEMY_TOKEN, network: Network.BASE_SEPOLIA }),
   bera_testnet: new Alchemy({
     apiKey: process.env.ALCHEMY_TOKEN,
-    url: `${process.env.RPC_URL_BERA_TESTNET}/${process.env.ALCHEMY_TOKEN}`,
+    url: `${process.env.RPC_URL_BERA}/${process.env.ALCHEMY_TOKEN}`,
   }),
 };
 
-const citreaProvider = new ethers.JsonRpcProvider(process.env.RPC_URL_CITREA_TESTNET);
+const citreaProvider = new ethers.JsonRpcProvider(process.env.RPC_URL_CITREA);
 
 interface StarkNetRpcResponse {
   jsonrpc: string;
@@ -98,7 +98,7 @@ const getTimestampForBlock = async (chain: string, blockNumber: number | null): 
 
   if (rpcChain === "starknet_sepolia") {
     try {
-      const rpcUrl = `${process.env.RPC_URL_STARKNET_SEPOLIA}${process.env.ALCHEMY_TOKEN}`;
+      const rpcUrl = `${process.env.RPC_URL_STARKNET}${process.env.ALCHEMY_TOKEN}`;
       const payload = {
         jsonrpc: "2.0",
         id: 1,
@@ -132,7 +132,7 @@ const getTimestampForBlock = async (chain: string, blockNumber: number | null): 
         console.error(`Invalid block number: ${blockNumber}`);
         return null;
       }
-      const rpcUrl = `${process.env.RPC_URL_MONAD_TESTNET}${process.env.ALCHEMY_TOKEN}`;
+      const rpcUrl = `${process.env.RPC_URL_MONAD}${process.env.ALCHEMY_TOKEN}`;
       const hexBlockNumber = "0x" + Number(blockNumber).toString(16);
       const payload = {
         jsonrpc: "2.0",
@@ -167,9 +167,9 @@ const getTimestampForBlock = async (chain: string, blockNumber: number | null): 
 
   if (rpcChain === "hyperliquid_testnet") {
     try {
-      const rpcUrl = process.env.RPC_URL_HYPERLIQUID_TESTNET;
+      const rpcUrl = process.env.RPC_URL_HYPERLIQUID;
       if (!rpcUrl) {
-        throw new Error("RPC_URL_HYPERLIQUID_TESTNET is not defined in .env");
+        throw new Error("RPC_URL_HYPERLIQUID is not defined in .env");
       }
       const params = [`0x${Number(blockNumber).toString(16)}`, false];
       const response = await axios.post(rpcUrl, {
@@ -206,9 +206,9 @@ const getTimestampForBlock = async (chain: string, blockNumber: number | null): 
 
   if (rpcChain === "bitcoin_testnet") {
     try {
-      const baseUrl = process.env.RPC_URL_BITCOIN_TESTNET;
+      const baseUrl = process.env.RPC_URL_BITCOIN;
       if (!baseUrl) {
-        throw new Error("RPC_URL_BITCOIN_TESTNET is not defined in .env");
+        throw new Error("RPC_URL_BITCOIN is not defined in .env");
       }
 
       const response = await fetch(`${baseUrl}/${blockNumber}`);
