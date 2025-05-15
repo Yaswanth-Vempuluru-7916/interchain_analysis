@@ -89,16 +89,16 @@ export const getChainCombinationAverages = async (
       )
       AND o.source_chain = ANY($3)
       AND o.destination_chain = ANY($4)
-      -- Implementing Mean ± 2SD anomaly filtering per chain combination
+      -- Implementing Mean + 2SD anomaly filtering per chain combination
       AND (
-        (o.user_init IS NULL OR GREATEST(EXTRACT(EPOCH FROM (o.user_init - o.created_at)), 0) BETWEEN 
-          (s.mean_user_init_duration - 2 * s.sd_user_init_duration) AND (s.mean_user_init_duration + 2 * s.sd_user_init_duration))
-        AND (o.cobi_init IS NULL OR o.user_init IS NULL OR GREATEST(EXTRACT(EPOCH FROM (o.cobi_init - o.user_init)), 0) BETWEEN 
-          (s.mean_cobi_init_duration - 2 * s.sd_cobi_init_duration) AND (s.mean_cobi_init_duration + 2 * s.sd_cobi_init_duration))
-        AND (o.user_redeem IS NULL OR o.user_init IS NULL OR GREATEST(EXTRACT(EPOCH FROM (o.user_redeem - o.cobi_init)), 0) BETWEEN 
-          (s.mean_user_redeem_duration - 2 * s.sd_user_redeem_duration) AND (s.mean_user_redeem_duration + 2 * s.sd_user_redeem_duration))
-        AND (o.cobi_redeem IS NULL OR o.cobi_init IS NULL OR GREATEST(EXTRACT(EPOCH FROM (o.cobi_redeem - o.cobi_init)), 0) BETWEEN 
-          (s.mean_cobi_redeem_duration - 2 * s.sd_cobi_redeem_duration) AND (s.mean_cobi_redeem_duration + 2 * s.sd_cobi_redeem_duration))
+        (o.user_init IS NULL OR GREATEST(EXTRACT(EPOCH FROM (o.user_init - o.created_at)), 0) <= 
+          (s.mean_user_init_duration + 2 * s.sd_user_init_duration))
+        AND (o.cobi_init IS NULL OR o.user_init IS NULL OR GREATEST(EXTRACT(EPOCH FROM (o.cobi_init - o.user_init)), 0) <= 
+          (s.mean_cobi_init_duration + 2 * s.sd_cobi_init_duration))
+        AND (o.user_redeem IS NULL OR o.user_init IS NULL OR GREATEST(EXTRACT(EPOCH FROM (o.user_redeem - o.cobi_init)), 0) <= 
+          (s.mean_user_redeem_duration + 2 * s.sd_user_redeem_duration))
+        AND (o.cobi_redeem IS NULL OR o.cobi_init IS NULL OR GREATEST(EXTRACT(EPOCH FROM (o.cobi_redeem - o.cobi_init)), 0) <= 
+          (s.mean_cobi_redeem_duration + 2 * s.sd_cobi_redeem_duration))
       )
     GROUP BY o.source_chain, o.destination_chain, 
              s.mean_user_init_duration, s.sd_user_init_duration,
@@ -162,33 +162,21 @@ export const getChainCombinationAverages = async (
       const key = `${row.source_chain}-${row.destination_chain}`;
       thresholdsByChain[key] = {
         user_init_duration: {
-          lower: row.mean_user_init_duration && row.sd_user_init_duration
-            ? parseFloat(row.mean_user_init_duration) - 2 * parseFloat(row.sd_user_init_duration)
-            : null,
           upper: row.mean_user_init_duration && row.sd_user_init_duration
             ? parseFloat(row.mean_user_init_duration) + 2 * parseFloat(row.sd_user_init_duration)
             : null,
         },
         cobi_init_duration: {
-          lower: row.mean_cobi_init_duration && row.sd_cobi_init_duration
-            ? parseFloat(row.mean_cobi_init_duration) - 2 * parseFloat(row.sd_cobi_init_duration)
-            : null,
           upper: row.mean_cobi_init_duration && row.sd_cobi_init_duration
             ? parseFloat(row.mean_cobi_init_duration) + 2 * parseFloat(row.sd_cobi_init_duration)
             : null,
         },
         user_redeem_duration: {
-          lower: row.mean_user_redeem_duration && row.sd_user_redeem_duration
-            ? parseFloat(row.mean_user_redeem_duration) - 2 * parseFloat(row.sd_user_redeem_duration)
-            : null,
           upper: row.mean_user_redeem_duration && row.sd_user_redeem_duration
             ? parseFloat(row.mean_user_redeem_duration) + 2 * parseFloat(row.sd_user_redeem_duration)
             : null,
         },
         cobi_redeem_duration: {
-          lower: row.mean_cobi_redeem_duration && row.sd_cobi_redeem_duration
-            ? parseFloat(row.mean_cobi_redeem_duration) - 2 * parseFloat(row.sd_cobi_redeem_duration)
-            : null,
           upper: row.mean_cobi_redeem_duration && row.sd_cobi_redeem_duration
             ? parseFloat(row.mean_cobi_redeem_duration) + 2 * parseFloat(row.sd_cobi_redeem_duration)
             : null,
@@ -213,7 +201,7 @@ export const getChainCombinationAverages = async (
     });
 
     res.json({
-      message: "Average durations for all chain combinations (in seconds, excluding anomalies via Mean ± 2SD)",
+      message: "Average durations for all chain combinations (in seconds, excluding anomalies via Mean + 2SD)",
       last_updated: lastUpdated,
       averages: chainCombinations,
       thresholds: thresholdsByChain,
@@ -301,16 +289,16 @@ export const getAllIndividualOrders = async (
       )
       AND o.source_chain = ANY($3)
       AND o.destination_chain = ANY($4)
-      -- Implementing Mean ± 2SD anomaly filtering to exclude anomalous orders
+      -- Implementing Mean + 2SD anomaly filtering to exclude anomalous orders
       AND (
-        (o.user_init IS NULL OR GREATEST(EXTRACT(EPOCH FROM (o.user_init - o.created_at)), 0) BETWEEN 
-          (s.mean_user_init_duration - 2 * s.sd_user_init_duration) AND (s.mean_user_init_duration + 2 * s.sd_user_init_duration))
-        AND (o.cobi_init IS NULL OR o.user_init IS NULL OR GREATEST(EXTRACT(EPOCH FROM (o.cobi_init - o.user_init)), 0) BETWEEN 
-          (s.mean_cobi_init_duration - 2 * s.sd_cobi_init_duration) AND (s.mean_cobi_init_duration + 2 * s.sd_cobi_init_duration))
-        AND (o.user_redeem IS NULL OR o.user_init IS NULL OR GREATEST(EXTRACT(EPOCH FROM (o.user_redeem - o.cobi_init)), 0) BETWEEN 
-          (s.mean_user_redeem_duration - 2 * s.sd_user_redeem_duration) AND (s.mean_user_redeem_duration + 2 * s.sd_user_redeem_duration))
-        AND (o.cobi_redeem IS NULL OR o.cobi_init IS NULL OR GREATEST(EXTRACT(EPOCH FROM (o.cobi_redeem - o.cobi_init)), 0) BETWEEN 
-          (s.mean_cobi_redeem_duration - 2 * s.sd_cobi_redeem_duration) AND (s.mean_cobi_redeem_duration + 2 * s.sd_cobi_redeem_duration))
+        (o.user_init IS NULL OR GREATEST(EXTRACT(EPOCH FROM (o.user_init - o.created_at)), 0) <= 
+          (s.mean_user_init_duration + 2 * s.sd_user_init_duration))
+        AND (o.cobi_init IS NULL OR o.user_init IS NULL OR GREATEST(EXTRACT(EPOCH FROM (o.cobi_init - o.user_init)), 0) <= 
+          (s.mean_cobi_init_duration + 2 * s.sd_cobi_init_duration))
+        AND (o.user_redeem IS NULL OR o.user_init IS NULL OR GREATEST(EXTRACT(EPOCH FROM (o.user_redeem - o.cobi_init)), 0) <= 
+          (s.mean_user_redeem_duration + 2 * s.sd_user_redeem_duration))
+        AND (o.cobi_redeem IS NULL OR o.cobi_init IS NULL OR GREATEST(EXTRACT(EPOCH FROM (o.cobi_redeem - o.cobi_init)), 0) <= 
+          (s.mean_cobi_redeem_duration + 2 * s.sd_cobi_redeem_duration))
       )
     ORDER BY o.source_chain, o.destination_chain, o.created_at ASC;
   `;
@@ -324,7 +312,7 @@ export const getAllIndividualOrders = async (
     ]);
 
     if (result.rows.length === 0) {
-      res.status(404).json({ error: "No non-anomalous orders found with timestamps in the given range (using Mean ± 2SD)" });
+      res.status(404).json({ error: "No non-anomalous orders found with timestamps in the given range (using Mean + 2SD)" });
       return;
     }
 
@@ -350,7 +338,7 @@ export const getAllIndividualOrders = async (
     }, {});
 
     res.json({
-      message: "Non-anomalous individual order durations for all chain combinations (in seconds, using Mean ± 2SD)",
+      message: "Non-anomalous individual order durations for all chain combinations (in seconds, using Mean + 2SD)",
       orders: ordersByChain,
     });
   } catch (err: any) {
@@ -436,16 +424,16 @@ export const getAnomalyOrders = async (
       )
       AND o.source_chain = ANY($3)
       AND o.destination_chain = ANY($4)
-      -- Implementing Mean ± 2SD anomaly detection
+      -- Implementing Mean + 2SD anomaly detection
       AND (
-        (o.user_init IS NOT NULL AND GREATEST(EXTRACT(EPOCH FROM (o.user_init - o.created_at)), 0) NOT BETWEEN 
-          (s.mean_user_init_duration - 2 * s.sd_user_init_duration) AND (s.mean_user_init_duration + 2 * s.sd_user_init_duration))
-        OR (o.cobi_init IS NOT NULL AND o.user_init IS NOT NULL AND GREATEST(EXTRACT(EPOCH FROM (o.cobi_init - o.user_init)), 0) NOT BETWEEN 
-          (s.mean_cobi_init_duration - 2 * s.sd_cobi_init_duration) AND (s.mean_cobi_init_duration + 2 * s.sd_cobi_init_duration))
-        OR (o.user_redeem IS NOT NULL AND o.user_init IS NOT NULL AND GREATEST(EXTRACT(EPOCH FROM (o.user_redeem - o.cobi_init)), 0) NOT BETWEEN 
-          (s.mean_user_redeem_duration - 2 * s.sd_user_redeem_duration) AND (s.mean_user_redeem_duration + 2 * s.sd_user_redeem_duration))
-        OR (o.cobi_redeem IS NOT NULL AND o.cobi_init IS NOT NULL AND GREATEST(EXTRACT(EPOCH FROM (o.cobi_redeem - o.cobi_init)), 0) NOT BETWEEN 
-          (s.mean_cobi_redeem_duration - 2 * s.sd_cobi_redeem_duration) AND (s.mean_cobi_redeem_duration + 2 * s.sd_cobi_redeem_duration))
+        (o.user_init IS NOT NULL AND GREATEST(EXTRACT(EPOCH FROM (o.user_init - o.created_at)), 0) > 
+          (s.mean_user_init_duration + 2 * s.sd_user_init_duration))
+        OR (o.cobi_init IS NOT NULL AND o.user_init IS NOT NULL AND GREATEST(EXTRACT(EPOCH FROM (o.cobi_init - o.user_init)), 0) > 
+          (s.mean_cobi_init_duration + 2 * s.sd_cobi_init_duration))
+        OR (o.user_redeem IS NOT NULL AND o.user_init IS NOT NULL AND GREATEST(EXTRACT(EPOCH FROM (o.user_redeem - o.cobi_init)), 0) > 
+          (s.mean_user_redeem_duration + 2 * s.sd_user_redeem_duration))
+        OR (o.cobi_redeem IS NOT NULL AND o.cobi_init IS NOT NULL AND GREATEST(EXTRACT(EPOCH FROM (o.cobi_redeem - o.cobi_init)), 0) > 
+          (s.mean_cobi_redeem_duration + 2 * s.sd_cobi_redeem_duration))
       )
     ORDER BY o.source_chain, o.destination_chain, o.created_at ASC;
   `;
@@ -459,7 +447,7 @@ export const getAnomalyOrders = async (
     ]);
 
     if (result.rows.length === 0) {
-      res.status(404).json({ error: "No anomalous orders found in the given range (using Mean ± 2SD)" });
+      res.status(404).json({ error: "No anomalous orders found in the given range (using Mean + 2SD)" });
       return;
     }
 
@@ -485,7 +473,7 @@ export const getAnomalyOrders = async (
     }, {});
 
     res.json({
-      message: "Anomalous order durations for all chain combinations (in seconds, using Mean ± 2SD)",
+      message: "Anomalous order durations for all chain combinations (in seconds, using Mean + 2SD)",
       orders: ordersByChain,
     });
   } catch (err: any) {

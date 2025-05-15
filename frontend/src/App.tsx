@@ -29,10 +29,10 @@ interface Order {
 }
 
 interface ThresholdData {
-  user_init_duration: { lower: number | null; upper: number | null };
-  cobi_init_duration: { lower: number | null; upper: number | null };
-  user_redeem_duration: { lower: number | null; upper: number | null };
-  cobi_redeem_duration: { lower: number | null; upper: number | null };
+  user_init_duration: { upper: number | null };
+  cobi_init_duration: { upper: number | null };
+  user_redeem_duration: { upper: number | null };
+  cobi_redeem_duration: {  upper: number | null };
 }
 
 interface AveragesResponse {
@@ -294,27 +294,27 @@ const App = () => {
                 <thead>
                   <tr className="bg-gray-100 text-gray-800 shadow-md">
                     <th className="py-4 px-6 text-left text-sm font-semibold uppercase tracking-wider border-b border-gray-200 sticky top-0 bg-gray-100">Chain Pair</th>
-                    <th className="py-4 px-6 text-left text-sm font-semibold uppercase tracking-wider border-b border-gray-200 sticky top-0 bg-gray-100">User Init Lower</th>
-                    <th className="py-4 px-6 text-left text-sm font-semibold uppercase tracking-wider border-b border-gray-200 sticky top-0 bg-gray-100">User Init Upper</th>
-                    <th className="py-4 px-6 text-left text-sm font-semibold uppercase tracking-wider border-b border-gray-200 sticky top-0 bg-gray-100">Cobi Init Lower</th>
-                    <th className="py-4 px-6 text-left text-sm font-semibold uppercase tracking-wider border-b border-gray-200 sticky top-0 bg-gray-100">Cobi Init Upper</th>
-                    <th className="py-4 px-6 text-left text-sm font-semibold uppercase tracking-wider border-b border-gray-200 sticky top-0 bg-gray-100">User Redeem Lower</th>
-                    <th className="py-4 px-6 text-left text-sm font-semibold uppercase tracking-wider border-b border-gray-200 sticky top-0 bg-gray-100">User Redeem Upper</th>
-                    <th className="py-4 px-6 text-left text-sm font-semibold uppercase tracking-wider border-b border-gray-200 sticky top-0 bg-gray-100">Cobi Redeem Lower</th>
-                    <th className="py-4 px-6 text-left text-sm font-semibold uppercase tracking-wider border-b border-gray-200 sticky top-0 bg-gray-100">Cobi Redeem Upper</th>
+                    {/* <th className="py-4 px-6 text-left text-sm font-semibold uppercase tracking-wider border-b border-gray-200 sticky top-0 bg-gray-100">User Init Lower</th> */}
+                    <th className="py-4 px-6 text-left text-sm font-semibold uppercase tracking-wider border-b border-gray-200 sticky top-0 bg-gray-100">User Init </th>
+                    {/* <th className="py-4 px-6 text-left text-sm font-semibold uppercase tracking-wider border-b border-gray-200 sticky top-0 bg-gray-100">Cobi Init Lower</th> */}
+                    <th className="py-4 px-6 text-left text-sm font-semibold uppercase tracking-wider border-b border-gray-200 sticky top-0 bg-gray-100">Cobi Init </th>
+                    {/* <th className="py-4 px-6 text-left text-sm font-semibold uppercase tracking-wider border-b border-gray-200 sticky top-0 bg-gray-100">User Redeem Lower</th> */}
+                    <th className="py-4 px-6 text-left text-sm font-semibold uppercase tracking-wider border-b border-gray-200 sticky top-0 bg-gray-100">User Redeem </th>
+                    {/* <th className="py-4 px-6 text-left text-sm font-semibold uppercase tracking-wider border-b border-gray-200 sticky top-0 bg-gray-100">Cobi Redeem Lower</th> */}
+                    <th className="py-4 px-6 text-left text-sm font-semibold uppercase tracking-wider border-b border-gray-200 sticky top-0 bg-gray-100">Cobi Redeem </th>
                   </tr>
                 </thead>
                 <tbody>
                   {Object.keys(anomaliesData).map((chainPair, idx) => (
                     <tr key={chainPair} className={`${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'} hover:bg-gray-100 transition-all duration-300 shadow-sm`}>
                       <td className="py-4 px-6 border-b border-gray-200 font-medium text-gray-800">{chainPair}</td>
-                      <td className="py-4 px-6 border-b border-gray-200 text-gray-700">{formatDecimal(anomaliesData[chainPair].user_init_duration.lower)}</td>
+                      {/* <td className="py-4 px-6 border-b border-gray-200 text-gray-700">{formatDecimal(anomaliesData[chainPair].user_init_duration.lower)}</td> */}
                       <td className="py-4 px-6 border-b border-gray-200 text-gray-700">{formatDecimal(anomaliesData[chainPair].user_init_duration.upper)}</td>
-                      <td className="py-4 px-6 border-b border-gray-200 text-gray-700">{formatDecimal(anomaliesData[chainPair].cobi_init_duration.lower)}</td>
+                      {/* <td className="py-4 px-6 border-b border-gray-200 text-gray-700">{formatDecimal(anomaliesData[chainPair].cobi_init_duration.lower)}</td> */}
                       <td className="py-4 px-6 border-b border-gray-200 text-gray-700">{formatDecimal(anomaliesData[chainPair].cobi_init_duration.upper)}</td>
-                      <td className="py-4 px-6 border-b border-gray-200 text-gray-700">{formatDecimal(anomaliesData[chainPair].user_redeem_duration.lower)}</td>
+                      {/* <td className="py-4 px-6 border-b border-gray-200 text-gray-700">{formatDecimal(anomaliesData[chainPair].user_redeem_duration.lower)}</td> */}
                       <td className="py-4 px-6 border-b border-gray-200 text-gray-700">{formatDecimal(anomaliesData[chainPair].user_redeem_duration.upper)}</td>
-                      <td className="py-4 px-6 border-b border-gray-200 text-gray-700">{formatDecimal(anomaliesData[chainPair].cobi_redeem_duration.lower)}</td>
+                      {/* <td className="py-4 px-6 border-b border-gray-200 text-gray-700">{formatDecimal(anomaliesData[chainPair].cobi_redeem_duration.lower)}</td> */}
                       <td className="py-4 px-6 border-b border-gray-200 text-gray-700">{formatDecimal(anomaliesData[chainPair].cobi_redeem_duration.upper)}</td>
                     </tr>
                   ))}
