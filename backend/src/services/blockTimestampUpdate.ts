@@ -4,7 +4,7 @@ import { Alchemy, Network } from "alchemy-sdk";
 import axios from "axios";
 import { ethers } from "ethers";
 import dotenv from "dotenv";
-import { analysisPool, supportedChains } from "../config/db";
+import { analysisPool, ORDERS_TABLE, supportedChains } from "../config/db";
 import { formatTimestampToIST } from "../utils/timeUtils";
 
 dotenv.config();
@@ -247,7 +247,7 @@ export const updateTimestampsForOrders = async (orderIds: string[]): Promise<voi
              user_redeem_block_number, user_refund_block_number,
              cobi_redeem_block_number, cobi_refund_block_number,
              create_order_id
-      FROM orders_final
+      FROM ${ORDERS_TABLE}
       WHERE create_order_id = ANY($1)
         AND (
           (user_init_block_number IS NOT NULL AND user_init IS NULL) OR
@@ -259,7 +259,7 @@ export const updateTimestampsForOrders = async (orderIds: string[]): Promise<voi
         )
     `;
     const result = await analysisPool.query(query, [orderIds]);
-    console.log(`Found ${result.rowCount} rows in orders_final to update timestamps`);
+    console.log(`Found ${result.rowCount} rows in ${ORDERS_TABLE} to update timestamps`);
 
     let successfulUpdates = 0;
     let failedUpdates: string[] = [];
@@ -362,7 +362,7 @@ export const updateTimestampsForOrders = async (orderIds: string[]): Promise<voi
 
         if (hasChanges) {
           const updateQuery = `
-            UPDATE orders_final
+            UPDATE ${ORDERS_TABLE}
             SET user_init = $1::timestamp with time zone,
                 cobi_init = $2::timestamp with time zone,
                 user_redeem = $3::timestamp with time zone,
@@ -402,7 +402,7 @@ export const updateTimestampsForOrders = async (orderIds: string[]): Promise<voi
       console.log(`Failed orders: ${failedUpdates.join(", ")}`);
     }
   } catch (err) {
-    console.error("Error updating timestamps in orders_final:", err);
+    console.error(`Error updating timestamps in ${ORDERS_TABLE}:`, err);
     throw err;
   }
 };

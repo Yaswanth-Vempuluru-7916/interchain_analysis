@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { analysisPool } from "../config/db";
+import { analysisPool, ORDERS_TABLE } from "../config/db";
 import { initTable, populateOrderAnalysis } from "../services/dbService";
 import { updateTimestampsForOrders } from "../services/blockTimestampUpdate";
 
@@ -18,7 +18,7 @@ export const updateTimestamps = async (req: Request, res: Response): Promise<voi
   try {
     const orderIdsQuery = `
       SELECT create_order_id
-      FROM orders_final
+      FROM ${ORDERS_TABLE}
       WHERE (
         (user_init_block_number IS NOT NULL AND user_init IS NULL) OR
         (user_redeem_block_number IS NOT NULL AND user_redeem IS NULL) OR
