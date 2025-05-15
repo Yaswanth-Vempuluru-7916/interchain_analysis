@@ -28,24 +28,33 @@ interface Order {
   };
 }
 
+interface ThresholdData {
+  user_init_duration: { lower: number | null; upper: number | null };
+  cobi_init_duration: { lower: number | null; upper: number | null };
+  user_redeem_duration: { lower: number | null; upper: number | null };
+  cobi_redeem_duration: { lower: number | null; upper: number | null };
+}
+
 interface AveragesResponse {
   message: string;
   last_updated: string;
   averages: Record<string, DurationData>;
+  thresholds?: Record<string, ThresholdData>;
 }
 
 interface OrdersResponse {
   message: string;
   orders: Record<string, Order[]>;
+  anomalies?: Record<string, ThresholdData>;
 }
 
 const App = () => {
-  const [startTime, setStartTime] = useState<Date | null>(null);
-  const [endTime, setEndTime] = useState<Date | null>(null);
+  const [startTime, setStartTime] = useState<Date | null>(new Date("2025-05-04T00:00:00Z"));
+  const [endTime, setEndTime] = useState<Date | null>(new Date("2025-05-07T00:00:00Z"));
   const [averagesData, setAveragesData] = useState<AveragesResponse['averages'] | null>(null);
   const [ordersData, setOrdersData] = useState<OrdersResponse['orders'] | null>(null);
-  // MODIFIED: Added state for anomalous orders
   const [anomalyOrdersData, setAnomalyOrdersData] = useState<OrdersResponse['orders'] | null>(null);
+  const [anomaliesData, setAnomaliesData] = useState<AveragesResponse['thresholds'] | null>(null);
   const [lastUpdated, setLastUpdated] = useState('');
   const [error, setError] = useState('');
   const [isFetching, setIsFetching] = useState(false);
@@ -63,8 +72,8 @@ const App = () => {
     setIsFetching(true);
     setAveragesData(null);
     setOrdersData(null);
-    // MODIFIED: Reset anomaly orders data
     setAnomalyOrdersData(null);
+    setAnomaliesData(null);
     setError('');
 
     try {
@@ -77,7 +86,6 @@ const App = () => {
           start_time: startTime ? startTime.toISOString() : undefined,
           end_time: endTime ? endTime.toISOString() : undefined,
         }),
-        // MODIFIED: Fetch anomalous orders from /orders/anomalies
         axios.post<OrdersResponse>('http://localhost:3000/orders/anomalies', {
           start_time: startTime ? startTime.toISOString() : undefined,
           end_time: endTime ? endTime.toISOString() : undefined,
@@ -86,12 +94,15 @@ const App = () => {
 
       setAveragesData(averagesResponse.data.averages);
       setOrdersData(ordersResponse.data.orders);
-      // MODIFIED: Set anomalous orders data
       setAnomalyOrdersData(anomalyOrdersResponse.data.orders);
+      setAnomaliesData(averagesResponse.data.thresholds || {});
       setLastUpdated(averagesResponse.data.last_updated);
       setError('');
-    } catch (err) {
-      setError('Failed to fetch data from backend');
+      if (!averagesResponse.data.thresholds) {
+        console.warn('No anomalies field in averages response');
+      }
+    } catch (err: any) {
+      setError('Failed to fetch data from backend: ' + err.message);
       console.error(err);
     } finally {
       setIsFetching(false);
@@ -209,7 +220,7 @@ const App = () => {
           }
         `}
       </style>
-      <div id="portal" />
+      <div id="portal" >
       <div className="max-w-7xl mx-auto mb-10 bg-white/90 backdrop-blur-md p-8 rounded-2xl shadow-lg border border-gray-200/50">
         <h1 className="text-4xl font-bold mb-6 text-gray-800 drop-shadow-lg">Garden Interchain Analysis</h1>
         
@@ -222,7 +233,6 @@ const App = () => {
               showTimeSelect
               dateFormat="yyyy-MM-dd HH:mm"
               timeFormat="HH:mm"
-              timeIntervals={15}
               maxDate={new Date()}
               portalId="portal"
               placeholderText="Select start date and time"
@@ -236,7 +246,6 @@ const App = () => {
               showTimeSelect
               dateFormat="yyyy-MM-dd HH:mm"
               timeFormat="HH:mm"
-              timeIntervals={15}
               maxDate={new Date()}
               portalId="portal"
               placeholderText="Select end date and time"
@@ -275,6 +284,52 @@ const App = () => {
       </div>
 
       <div className="max-w-7xl mx-auto mb-12">
+        <h2 className="text-2xl font-bold mb-6 inline-block border-b-2 border-[#F06292] pb-2 text-gray-800">Anomaly Thresholds (Mean + 2SD)</h2>
+        {isFetching ? (
+          <div className="text-gray-600 text-center mt-8 animate-pulse">Fetching thresholds...</div>
+        ) : (
+          anomaliesData && Object.keys(anomaliesData).length > 0 ? (
+            <div className="overflow-x-auto rounded-xl backdrop-blur bg-white/90 border border-gray-200/50 shadow-lg">
+              <table className="w-full border-collapse">
+                <thead>
+                  <tr className="bg-gray-100 text-gray-800 shadow-md">
+                    <th className="py-4 px-6 text-left text-sm font-semibold uppercase tracking-wider border-b border-gray-200 sticky top-0 bg-gray-100">Chain Pair</th>
+                    <th className="py-4 px-6 text-left text-sm font-semibold uppercase tracking-wider border-b border-gray-200 sticky top-0 bg-gray-100">User Init Lower</th>
+                    <th className="py-4 px-6 text-left text-sm font-semibold uppercase tracking-wider border-b border-gray-200 sticky top-0 bg-gray-100">User Init Upper</th>
+                    <th className="py-4 px-6 text-left text-sm font-semibold uppercase tracking-wider border-b border-gray-200 sticky top-0 bg-gray-100">Cobi Init Lower</th>
+                    <th className="py-4 px-6 text-left text-sm font-semibold uppercase tracking-wider border-b border-gray-200 sticky top-0 bg-gray-100">Cobi Init Upper</th>
+                    <th className="py-4 px-6 text-left text-sm font-semibold uppercase tracking-wider border-b border-gray-200 sticky top-0 bg-gray-100">User Redeem Lower</th>
+                    <th className="py-4 px-6 text-left text-sm font-semibold uppercase tracking-wider border-b border-gray-200 sticky top-0 bg-gray-100">User Redeem Upper</th>
+                    <th className="py-4 px-6 text-left text-sm font-semibold uppercase tracking-wider border-b border-gray-200 sticky top-0 bg-gray-100">Cobi Redeem Lower</th>
+                    <th className="py-4 px-6 text-left text-sm font-semibold uppercase tracking-wider border-b border-gray-200 sticky top-0 bg-gray-100">Cobi Redeem Upper</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.keys(anomaliesData).map((chainPair, idx) => (
+                    <tr key={chainPair} className={`${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'} hover:bg-gray-100 transition-all duration-300 shadow-sm`}>
+                      <td className="py-4 px-6 border-b border-gray-200 font-medium text-gray-800">{chainPair}</td>
+                      <td className="py-4 px-6 border-b border-gray-200 text-gray-700">{formatDecimal(anomaliesData[chainPair].user_init_duration.lower)}</td>
+                      <td className="py-4 px-6 border-b border-gray-200 text-gray-700">{formatDecimal(anomaliesData[chainPair].user_init_duration.upper)}</td>
+                      <td className="py-4 px-6 border-b border-gray-200 text-gray-700">{formatDecimal(anomaliesData[chainPair].cobi_init_duration.lower)}</td>
+                      <td className="py-4 px-6 border-b border-gray-200 text-gray-700">{formatDecimal(anomaliesData[chainPair].cobi_init_duration.upper)}</td>
+                      <td className="py-4 px-6 border-b border-gray-200 text-gray-700">{formatDecimal(anomaliesData[chainPair].user_redeem_duration.lower)}</td>
+                      <td className="py-4 px-6 border-b border-gray-200 text-gray-700">{formatDecimal(anomaliesData[chainPair].user_redeem_duration.upper)}</td>
+                      <td className="py-4 px-6 border-b border-gray-200 text-gray-700">{formatDecimal(anomaliesData[chainPair].cobi_redeem_duration.lower)}</td>
+                      <td className="py-4 px-6 border-b border-gray-200 text-gray-700">{formatDecimal(anomaliesData[chainPair].cobi_redeem_duration.upper)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="text-gray-600 text-center mt-8 animate-pulse">
+              {anomaliesData ? 'No anomaly thresholds available' : 'Loading anomaly thresholds...'}
+            </div>
+          )
+        )}
+      </div>
+
+      <div className="max-w-7xl mx-auto mb-12">
         <h2 className="text-2xl font-bold mb-6 inline-block border-b-2 border-[#F06292] pb-2 text-gray-800">Average Durations</h2>
         {isFetching ? (
           <div className="text-gray-600 text-center mt-8 animate-pulse">Fetching chains...</div>
@@ -296,7 +351,7 @@ const App = () => {
                 </thead>
                 <tbody>
                   {Object.keys(averagesData)
-                    .filter((chainPair) => averagesData[chainPair].total_orders > 0) // Filter out rows where total_orders is 0
+                    .filter((chainPair) => averagesData[chainPair].total_orders > 0)
                     .map((chainPair, idx) => (
                       <tr key={chainPair} className={`${idx % 2 === 0 ? 'bg-white' : 'bg-gray-50'} hover:bg-gray-100 transition-all duration-300 shadow-sm`}>
                         <td className="py-4 px-6 border-b border-gray-200 font-medium text-gray-800">{chainPair}</td>
@@ -398,7 +453,6 @@ const App = () => {
         )}
       </div>
 
-      {/* MODIFIED: Added section for anomalous orders */}
       <div className="max-w-7xl mx-auto">
         <h2 className="text-2xl font-bold mb-6 inline-block border-b-2 border-[#F06292] pb-2 text-gray-800">Anomalous Orders</h2>
         {isFetching ? (
@@ -478,6 +532,7 @@ const App = () => {
           <div className="text-gray-600 text-center mt-8 animate-pulse">Loading anomalous orders...</div>
         )}
       </div>
+    </div>
     </div>
   );
 };
