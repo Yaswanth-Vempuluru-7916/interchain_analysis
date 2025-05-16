@@ -22,18 +22,14 @@ export const getChainCombinationAverages = async (
   }
 
   const query = `
-    WITH stats AS (
+    WITH durations AS (
       SELECT
         source_chain,
         destination_chain,
-        AVG(CASE WHEN user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (user_init - created_at)), 0) END) AS mean_user_init_duration,
-        STDDEV_POP(CASE WHEN user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (user_init - created_at)), 0) END) AS sd_user_init_duration,
-        AVG(CASE WHEN cobi_init IS NOT NULL AND user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_init - user_init)), 0) END) AS mean_cobi_init_duration,
-        STDDEV_POP(CASE WHEN cobi_init IS NOT NULL AND user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_init - user_init)), 0) END) AS sd_cobi_init_duration,
-        AVG(CASE WHEN user_redeem IS NOT NULL AND user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (user_redeem - cobi_init)), 0) END) AS mean_user_redeem_duration,
-        STDDEV_POP(CASE WHEN user_redeem IS NOT NULL AND user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (user_redeem - cobi_init)), 0) END) AS sd_user_redeem_duration,
-        AVG(CASE WHEN cobi_redeem IS NOT NULL AND cobi_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_redeem - cobi_init)), 0) END) AS mean_cobi_redeem_duration,
-        STDDEV_POP(CASE WHEN cobi_redeem IS NOT NULL AND cobi_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_redeem - cobi_init)), 0) END) AS sd_cobi_redeem_duration
+        CASE WHEN user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (user_init - created_at)), 0) END AS user_init_duration,
+        CASE WHEN cobi_init IS NOT NULL AND user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_init - user_init)), 0) END AS cobi_init_duration,
+        CASE WHEN user_redeem IS NOT NULL AND user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (user_redeem - cobi_init)), 0) END AS user_redeem_duration,
+        CASE WHEN cobi_redeem IS NOT NULL AND cobi_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_redeem - cobi_init)), 0) END AS cobi_redeem_duration
       FROM ${ORDERS_TABLE}
       WHERE created_at BETWEEN $1 AND $2
         AND (
@@ -46,6 +42,20 @@ export const getChainCombinationAverages = async (
         )
         AND source_chain = ANY($3)
         AND destination_chain = ANY($4)
+    ),
+    stats AS (
+      SELECT
+        source_chain,
+        destination_chain,
+        PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY user_init_duration) AS q1_user_init_duration,
+        PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY user_init_duration) AS q3_user_init_duration,
+        PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY cobi_init_duration) AS q1_cobi_init_duration,
+        PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY cobi_init_duration) AS q3_cobi_init_duration,
+        PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY user_redeem_duration) AS q1_user_redeem_duration,
+        PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY user_redeem_duration) AS q3_user_redeem_duration,
+        PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY cobi_redeem_duration) AS q1_cobi_redeem_duration,
+        PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY cobi_redeem_duration) AS q3_cobi_redeem_duration
+      FROM durations
       GROUP BY source_chain, destination_chain
     )
     SELECT
@@ -68,14 +78,14 @@ export const getChainCombinationAverages = async (
       AVG(CASE WHEN o.user_refund IS NOT NULL AND o.user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (o.user_refund - o.user_init)), 0) END) AS avg_user_refund_duration,
       AVG(CASE WHEN o.cobi_redeem IS NOT NULL AND o.cobi_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (o.cobi_redeem - o.cobi_init)), 0) END) AS avg_cobi_redeem_duration,
       AVG(CASE WHEN o.cobi_refund IS NOT NULL AND o.cobi_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (o.cobi_refund - o.cobi_init)), 0) END) AS avg_cobi_refund_duration,
-      s.mean_user_init_duration,
-      s.sd_user_init_duration,
-      s.mean_cobi_init_duration,
-      s.sd_cobi_init_duration,
-      s.mean_user_redeem_duration,
-      s.sd_user_redeem_duration,
-      s.mean_cobi_redeem_duration,
-      s.sd_cobi_redeem_duration
+      s.q1_user_init_duration,
+      s.q3_user_init_duration,
+      s.q1_cobi_init_duration,
+      s.q3_cobi_init_duration,
+      s.q1_user_redeem_duration,
+      s.q3_user_redeem_duration,
+      s.q1_cobi_redeem_duration,
+      s.q3_cobi_redeem_duration
     FROM ${ORDERS_TABLE} o
     JOIN stats s ON o.source_chain = s.source_chain AND o.destination_chain = s.destination_chain
     WHERE o.created_at BETWEEN $1 AND $2
@@ -89,22 +99,26 @@ export const getChainCombinationAverages = async (
       )
       AND o.source_chain = ANY($3)
       AND o.destination_chain = ANY($4)
-      -- Implementing Mean + 2SD anomaly filtering per chain combination
+      -- Implementing IQR anomaly filtering per chain combination
       AND (
-        (o.user_init IS NULL OR GREATEST(EXTRACT(EPOCH FROM (o.user_init - o.created_at)), 0) <= 
-          (s.mean_user_init_duration + 2 * s.sd_user_init_duration))
-        AND (o.cobi_init IS NULL OR o.user_init IS NULL OR GREATEST(EXTRACT(EPOCH FROM (o.cobi_init - o.user_init)), 0) <= 
-          (s.mean_cobi_init_duration + 2 * s.sd_cobi_init_duration))
-        AND (o.user_redeem IS NULL OR o.user_init IS NULL OR GREATEST(EXTRACT(EPOCH FROM (o.user_redeem - o.cobi_init)), 0) <= 
-          (s.mean_user_redeem_duration + 2 * s.sd_user_redeem_duration))
-        AND (o.cobi_redeem IS NULL OR o.cobi_init IS NULL OR GREATEST(EXTRACT(EPOCH FROM (o.cobi_redeem - o.cobi_init)), 0) <= 
-          (s.mean_cobi_redeem_duration + 2 * s.sd_cobi_redeem_duration))
+        (o.user_init IS NULL OR GREATEST(EXTRACT(EPOCH FROM (o.user_init - o.created_at)), 0) BETWEEN 
+          (s.q1_user_init_duration - 1.5 * (s.q3_user_init_duration - s.q1_user_init_duration)) 
+          AND (s.q3_user_init_duration + 1.5 * (s.q3_user_init_duration - s.q1_user_init_duration)))
+        AND (o.cobi_init IS NULL OR o.user_init IS NULL OR GREATEST(EXTRACT(EPOCH FROM (o.cobi_init - o.user_init)), 0) BETWEEN 
+          (s.q1_cobi_init_duration - 1.5 * (s.q3_cobi_init_duration - s.q1_cobi_init_duration)) 
+          AND (s.q3_cobi_init_duration + 1.5 * (s.q3_cobi_init_duration - s.q1_cobi_init_duration)))
+        AND (o.user_redeem IS NULL OR o.user_init IS NULL OR GREATEST(EXTRACT(EPOCH FROM (o.user_redeem - o.cobi_init)), 0) BETWEEN 
+          (s.q1_user_redeem_duration - 1.5 * (s.q3_user_redeem_duration - s.q1_user_redeem_duration)) 
+          AND (s.q3_user_redeem_duration + 1.5 * (s.q3_user_redeem_duration - s.q1_user_redeem_duration)))
+        AND (o.cobi_redeem IS NULL OR o.cobi_init IS NULL OR GREATEST(EXTRACT(EPOCH FROM (o.cobi_redeem - o.cobi_init)), 0) BETWEEN 
+          (s.q1_cobi_redeem_duration - 1.5 * (s.q3_cobi_redeem_duration - s.q1_cobi_redeem_duration)) 
+          AND (s.q3_cobi_redeem_duration + 1.5 * (s.q3_cobi_redeem_duration - s.q1_cobi_redeem_duration)))
       )
     GROUP BY o.source_chain, o.destination_chain, 
-             s.mean_user_init_duration, s.sd_user_init_duration,
-             s.mean_cobi_init_duration, s.sd_cobi_init_duration,
-             s.mean_user_redeem_duration, s.sd_user_redeem_duration,
-             s.mean_cobi_redeem_duration, s.sd_cobi_redeem_duration
+             s.q1_user_init_duration, s.q3_user_init_duration,
+             s.q1_cobi_init_duration, s.q3_cobi_init_duration,
+             s.q1_user_redeem_duration, s.q3_user_redeem_duration,
+             s.q1_cobi_redeem_duration, s.q3_cobi_redeem_duration
     ORDER BY o.source_chain, o.destination_chain;
   `;
 
@@ -162,23 +176,35 @@ export const getChainCombinationAverages = async (
       const key = `${row.source_chain}-${row.destination_chain}`;
       thresholdsByChain[key] = {
         user_init_duration: {
-          upper: row.mean_user_init_duration && row.sd_user_init_duration
-            ? parseFloat(row.mean_user_init_duration) + 2 * parseFloat(row.sd_user_init_duration)
+          lower: row.q1_user_init_duration && row.q3_user_init_duration
+            ? parseFloat(row.q1_user_init_duration) - 1.5 * (parseFloat(row.q3_user_init_duration) - parseFloat(row.q1_user_init_duration))
+            : null,
+          upper: row.q1_user_init_duration && row.q3_user_init_duration
+            ? parseFloat(row.q3_user_init_duration) + 1.5 * (parseFloat(row.q3_user_init_duration) - parseFloat(row.q1_user_init_duration))
             : null,
         },
         cobi_init_duration: {
-          upper: row.mean_cobi_init_duration && row.sd_cobi_init_duration
-            ? parseFloat(row.mean_cobi_init_duration) + 2 * parseFloat(row.sd_cobi_init_duration)
+          lower: row.q1_cobi_init_duration && row.q3_cobi_init_duration
+            ? parseFloat(row.q1_cobi_init_duration) - 1.5 * (parseFloat(row.q3_cobi_init_duration) - parseFloat(row.q1_cobi_init_duration))
+            : null,
+          upper: row.q1_cobi_init_duration && row.q3_cobi_init_duration
+            ? parseFloat(row.q3_cobi_init_duration) + 1.5 * (parseFloat(row.q3_cobi_init_duration) - parseFloat(row.q1_cobi_init_duration))
             : null,
         },
         user_redeem_duration: {
-          upper: row.mean_user_redeem_duration && row.sd_user_redeem_duration
-            ? parseFloat(row.mean_user_redeem_duration) + 2 * parseFloat(row.sd_user_redeem_duration)
+          lower: row.q1_user_redeem_duration && row.q3_user_redeem_duration
+            ? parseFloat(row.q1_user_redeem_duration) - 1.5 * (parseFloat(row.q3_user_redeem_duration) - parseFloat(row.q1_user_redeem_duration))
+            : null,
+          upper: row.q1_user_redeem_duration && row.q3_user_redeem_duration
+            ? parseFloat(row.q3_user_redeem_duration) + 1.5 * (parseFloat(row.q3_user_redeem_duration) - parseFloat(row.q1_user_redeem_duration))
             : null,
         },
         cobi_redeem_duration: {
-          upper: row.mean_cobi_redeem_duration && row.sd_cobi_redeem_duration
-            ? parseFloat(row.mean_cobi_redeem_duration) + 2 * parseFloat(row.sd_cobi_redeem_duration)
+          lower: row.q1_cobi_redeem_duration && row.q3_cobi_redeem_duration
+            ? parseFloat(row.q1_cobi_redeem_duration) - 1.5 * (parseFloat(row.q3_cobi_redeem_duration) - parseFloat(row.q1_cobi_redeem_duration))
+            : null,
+          upper: row.q1_cobi_redeem_duration && row.q3_cobi_redeem_duration
+            ? parseFloat(row.q3_cobi_redeem_duration) + 1.5 * (parseFloat(row.q3_cobi_redeem_duration) - parseFloat(row.q1_cobi_redeem_duration))
             : null,
         },
       };
@@ -201,7 +227,7 @@ export const getChainCombinationAverages = async (
     });
 
     res.json({
-      message: "Average durations for all chain combinations (in seconds, excluding anomalies via Mean + 2SD)",
+      message: "Average durations for all chain combinations (in seconds, excluding anomalies via IQR)",
       last_updated: lastUpdated,
       averages: chainCombinations,
       thresholds: thresholdsByChain,
@@ -231,18 +257,14 @@ export const getAllIndividualOrders = async (
   }
 
   const query = `
-    WITH stats AS (
+    WITH durations AS (
       SELECT
         source_chain,
         destination_chain,
-        AVG(CASE WHEN user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (user_init - created_at)), 0) END) AS mean_user_init_duration,
-        STDDEV_POP(CASE WHEN user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (user_init - created_at)), 0) END) AS sd_user_init_duration,
-        AVG(CASE WHEN cobi_init IS NOT NULL AND user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_init - user_init)), 0) END) AS mean_cobi_init_duration,
-        STDDEV_POP(CASE WHEN cobi_init IS NOT NULL AND user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_init - user_init)), 0) END) AS sd_cobi_init_duration,
-        AVG(CASE WHEN user_redeem IS NOT NULL AND user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (user_redeem - cobi_init)), 0) END) AS mean_user_redeem_duration,
-        STDDEV_POP(CASE WHEN user_redeem IS NOT NULL AND user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (user_redeem - cobi_init)), 0) END) AS sd_user_redeem_duration,
-        AVG(CASE WHEN cobi_redeem IS NOT NULL AND cobi_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_redeem - cobi_init)), 0) END) AS mean_cobi_redeem_duration,
-        STDDEV_POP(CASE WHEN cobi_redeem IS NOT NULL AND cobi_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_redeem - cobi_init)), 0) END) AS sd_cobi_redeem_duration
+        CASE WHEN user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (user_init - created_at)), 0) END AS user_init_duration,
+        CASE WHEN cobi_init IS NOT NULL AND user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_init - user_init)), 0) END AS cobi_init_duration,
+        CASE WHEN user_redeem IS NOT NULL AND user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (user_redeem - cobi_init)), 0) END AS user_redeem_duration,
+        CASE WHEN cobi_redeem IS NOT NULL AND cobi_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_redeem - cobi_init)), 0) END AS cobi_redeem_duration
       FROM ${ORDERS_TABLE}
       WHERE created_at BETWEEN $1 AND $2
         AND (
@@ -255,6 +277,20 @@ export const getAllIndividualOrders = async (
         )
         AND source_chain = ANY($3)
         AND destination_chain = ANY($4)
+    ),
+    stats AS (
+      SELECT
+        source_chain,
+        destination_chain,
+        PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY user_init_duration) AS q1_user_init_duration,
+        PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY user_init_duration) AS q3_user_init_duration,
+        PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY cobi_init_duration) AS q1_cobi_init_duration,
+        PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY cobi_init_duration) AS q3_cobi_init_duration,
+        PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY user_redeem_duration) AS q1_user_redeem_duration,
+        PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY user_redeem_duration) AS q3_user_redeem_duration,
+        PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY cobi_redeem_duration) AS q1_cobi_redeem_duration,
+        PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY cobi_redeem_duration) AS q3_cobi_redeem_duration
+      FROM durations
       GROUP BY source_chain, destination_chain
     )
     SELECT
@@ -289,16 +325,20 @@ export const getAllIndividualOrders = async (
       )
       AND o.source_chain = ANY($3)
       AND o.destination_chain = ANY($4)
-      -- Implementing Mean + 2SD anomaly filtering to exclude anomalous orders
+      -- Implementing IQR anomaly filtering to exclude anomalous orders
       AND (
-        (o.user_init IS NULL OR GREATEST(EXTRACT(EPOCH FROM (o.user_init - o.created_at)), 0) <= 
-          (s.mean_user_init_duration + 2 * s.sd_user_init_duration))
-        AND (o.cobi_init IS NULL OR o.user_init IS NULL OR GREATEST(EXTRACT(EPOCH FROM (o.cobi_init - o.user_init)), 0) <= 
-          (s.mean_cobi_init_duration + 2 * s.sd_cobi_init_duration))
-        AND (o.user_redeem IS NULL OR o.user_init IS NULL OR GREATEST(EXTRACT(EPOCH FROM (o.user_redeem - o.cobi_init)), 0) <= 
-          (s.mean_user_redeem_duration + 2 * s.sd_user_redeem_duration))
-        AND (o.cobi_redeem IS NULL OR o.cobi_init IS NULL OR GREATEST(EXTRACT(EPOCH FROM (o.cobi_redeem - o.cobi_init)), 0) <= 
-          (s.mean_cobi_redeem_duration + 2 * s.sd_cobi_redeem_duration))
+        (o.user_init IS NULL OR GREATEST(EXTRACT(EPOCH FROM (o.user_init - o.created_at)), 0) BETWEEN 
+          (s.q1_user_init_duration - 1.5 * (s.q3_user_init_duration - s.q1_user_init_duration)) 
+          AND (s.q3_user_init_duration + 1.5 * (s.q3_user_init_duration - s.q1_user_init_duration)))
+        AND (o.cobi_init IS NULL OR o.user_init IS NULL OR GREATEST(EXTRACT(EPOCH FROM (o.cobi_init - o.user_init)), 0) BETWEEN 
+          (s.q1_cobi_init_duration - 1.5 * (s.q3_cobi_init_duration - s.q1_cobi_init_duration)) 
+          AND (s.q3_cobi_init_duration + 1.5 * (s.q3_cobi_init_duration - s.q1_cobi_init_duration)))
+        AND (o.user_redeem IS NULL OR o.user_init IS NULL OR GREATEST(EXTRACT(EPOCH FROM (o.user_redeem - o.cobi_init)), 0) BETWEEN 
+          (s.q1_user_redeem_duration - 1.5 * (s.q3_user_redeem_duration - s.q1_user_redeem_duration)) 
+          AND (s.q3_user_redeem_duration + 1.5 * (s.q3_user_redeem_duration - s.q1_user_redeem_duration)))
+        AND (o.cobi_redeem IS NULL OR o.cobi_init IS NULL OR GREATEST(EXTRACT(EPOCH FROM (o.cobi_redeem - o.cobi_init)), 0) BETWEEN 
+          (s.q1_cobi_redeem_duration - 1.5 * (s.q3_cobi_redeem_duration - s.q1_cobi_redeem_duration)) 
+          AND (s.q3_cobi_redeem_duration + 1.5 * (s.q3_cobi_redeem_duration - s.q1_cobi_redeem_duration)))
       )
     ORDER BY o.source_chain, o.destination_chain, o.created_at ASC;
   `;
@@ -312,7 +352,7 @@ export const getAllIndividualOrders = async (
     ]);
 
     if (result.rows.length === 0) {
-      res.status(404).json({ error: "No non-anomalous orders found with timestamps in the given range (using Mean + 2SD)" });
+      res.status(404).json({ error: "No non-anomalous orders found with timestamps in the given range (using IQR)" });
       return;
     }
 
@@ -338,7 +378,7 @@ export const getAllIndividualOrders = async (
     }, {});
 
     res.json({
-      message: "Non-anomalous individual order durations for all chain combinations (in seconds, using Mean + 2SD)",
+      message: "Non-anomalous individual order durations for all chain combinations (in seconds, using IQR)",
       orders: ordersByChain,
     });
   } catch (err: any) {
@@ -366,19 +406,15 @@ export const getAnomalyOrders = async (
   }
 
   const query = `
-    WITH stats AS (
+    WITH durations AS (
       SELECT
         source_chain,
         destination_chain,
-        AVG(CASE WHEN user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (user_init - created_at)), 0) END) AS mean_user_init_duration,
-        STDDEV_POP(CASE WHEN user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (user_init - created_at)), 0) END) AS sd_user_init_duration,
-        AVG(CASE WHEN cobi_init IS NOT NULL AND user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_init - user_init)), 0) END) AS mean_cobi_init_duration,
-        STDDEV_POP(CASE WHEN cobi_init IS NOT NULL AND user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_init - user_init)), 0) END) AS sd_cobi_init_duration,
-        AVG(CASE WHEN user_redeem IS NOT NULL AND user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (user_redeem - cobi_init)), 0) END) AS mean_user_redeem_duration,
-        STDDEV_POP(CASE WHEN user_redeem IS NOT NULL AND user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (user_redeem - cobi_init)), 0) END) AS sd_user_redeem_duration,
-        AVG(CASE WHEN cobi_redeem IS NOT NULL AND cobi_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_redeem - cobi_init)), 0) END) AS mean_cobi_redeem_duration,
-        STDDEV_POP(CASE WHEN cobi_redeem IS NOT NULL AND cobi_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_redeem - cobi_init)), 0) END) AS sd_cobi_redeem_duration
-      FROM ${ORDERS_TABLE}
+        CASE WHEN user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (user_init - created_at)), 0) END AS user_init_duration,
+        CASE WHEN cobi_init IS NOT NULL AND user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_init - o.user_init)), 0) END AS cobi_init_duration,
+        CASE WHEN user_redeem IS NOT NULL AND user_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (user_redeem - cobi_init)), 0) END AS user_redeem_duration,
+        CASE WHEN cobi_redeem IS NOT NULL AND cobi_init IS NOT NULL THEN GREATEST(EXTRACT(EPOCH FROM (cobi_redeem - cobi_init)), 0) END AS cobi_redeem_duration
+      FROM ${ORDERS_TABLE} o
       WHERE created_at BETWEEN $1 AND $2
         AND (
           user_init IS NOT NULL OR
@@ -390,6 +426,20 @@ export const getAnomalyOrders = async (
         )
         AND source_chain = ANY($3)
         AND destination_chain = ANY($4)
+    ),
+    stats AS (
+      SELECT
+        source_chain,
+        destination_chain,
+        PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY user_init_duration) AS q1_user_init_duration,
+        PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY user_init_duration) AS q3_user_init_duration,
+        PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY cobi_init_duration) AS q1_cobi_init_duration,
+        PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY cobi_init_duration) AS q3_cobi_init_duration,
+        PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY user_redeem_duration) AS q1_user_redeem_duration,
+        PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY user_redeem_duration) AS q3_user_redeem_duration,
+        PERCENTILE_CONT(0.25) WITHIN GROUP (ORDER BY cobi_redeem_duration) AS q1_cobi_redeem_duration,
+        PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY cobi_redeem_duration) AS q3_cobi_redeem_duration
+      FROM durations
       GROUP BY source_chain, destination_chain
     )
     SELECT
@@ -424,16 +474,20 @@ export const getAnomalyOrders = async (
       )
       AND o.source_chain = ANY($3)
       AND o.destination_chain = ANY($4)
-      -- Implementing Mean + 2SD anomaly detection
+      -- Implementing IQR anomaly detection
       AND (
-        (o.user_init IS NOT NULL AND GREATEST(EXTRACT(EPOCH FROM (o.user_init - o.created_at)), 0) > 
-          (s.mean_user_init_duration + 2 * s.sd_user_init_duration))
-        OR (o.cobi_init IS NOT NULL AND o.user_init IS NOT NULL AND GREATEST(EXTRACT(EPOCH FROM (o.cobi_init - o.user_init)), 0) > 
-          (s.mean_cobi_init_duration + 2 * s.sd_cobi_init_duration))
-        OR (o.user_redeem IS NOT NULL AND o.user_init IS NOT NULL AND GREATEST(EXTRACT(EPOCH FROM (o.user_redeem - o.cobi_init)), 0) > 
-          (s.mean_user_redeem_duration + 2 * s.sd_user_redeem_duration))
-        OR (o.cobi_redeem IS NOT NULL AND o.cobi_init IS NOT NULL AND GREATEST(EXTRACT(EPOCH FROM (o.cobi_redeem - o.cobi_init)), 0) > 
-          (s.mean_cobi_redeem_duration + 2 * s.sd_cobi_redeem_duration))
+        (o.user_init IS NOT NULL AND GREATEST(EXTRACT(EPOCH FROM (o.user_init - o.created_at)), 0) NOT BETWEEN 
+          (s.q1_user_init_duration - 1.5 * (s.q3_user_init_duration - s.q1_user_init_duration)) 
+          AND (s.q3_user_init_duration + 1.5 * (s.q3_user_init_duration - s.q1_user_init_duration)))
+        OR (o.cobi_init IS NOT NULL AND o.user_init IS NOT NULL AND GREATEST(EXTRACT(EPOCH FROM (o.cobi_init - o.user_init)), 0) NOT BETWEEN 
+          (s.q1_cobi_init_duration - 1.5 * (s.q3_cobi_init_duration - s.q1_cobi_init_duration)) 
+          AND (s.q3_cobi_init_duration + 1.5 * (s.q3_cobi_init_duration - s.q1_cobi_init_duration)))
+        OR (o.user_redeem IS NOT NULL AND o.user_init IS NOT NULL AND GREATEST(EXTRACT(EPOCH FROM (o.user_redeem - o.cobi_init)), 0) NOT BETWEEN 
+          (s.q1_user_redeem_duration - 1.5 * (s.q3_user_redeem_duration - s.q1_user_redeem_duration)) 
+          AND (s.q3_user_redeem_duration + 1.5 * (s.q3_user_redeem_duration - s.q1_user_redeem_duration)))
+        OR (o.cobi_redeem IS NOT NULL AND o.cobi_init IS NOT NULL AND GREATEST(EXTRACT(EPOCH FROM (o.cobi_redeem - o.cobi_init)), 0) NOT BETWEEN 
+          (s.q1_cobi_redeem_duration - 1.5 * (s.q3_cobi_redeem_duration - s.q1_cobi_redeem_duration)) 
+          AND (s.q3_cobi_redeem_duration + 1.5 * (s.q3_cobi_redeem_duration - s.q1_cobi_redeem_duration)))
       )
     ORDER BY o.source_chain, o.destination_chain, o.created_at ASC;
   `;
@@ -447,7 +501,7 @@ export const getAnomalyOrders = async (
     ]);
 
     if (result.rows.length === 0) {
-      res.status(404).json({ error: "No anomalous orders found in the given range (using Mean + 2SD)" });
+      res.status(404).json({ error: "No anomalous orders found in the given range (using IQR)" });
       return;
     }
 
@@ -473,7 +527,7 @@ export const getAnomalyOrders = async (
     }, {});
 
     res.json({
-      message: "Anomalous order durations for all chain combinations (in seconds, using Mean + 2SD)",
+      message: "Anomalous order durations for all chain combinations (in seconds, using IQR)",
       orders: ordersByChain,
     });
   } catch (err: any) {
